@@ -1,0 +1,1130 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Impact Chain Visualization</title>
+    <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
+    <style>
+        :root {
+            --bg-primary: #0b0f19;
+            --bg-secondary: #111827;
+            --bg-tertiary: #1f2937;
+            --border-color: #374151;
+            --text-primary: #f9fafb;
+            --text-secondary: #9ca3af;
+            --text-muted: #6b7280;
+            --accent-blue: #3b82f6;
+            --accent-purple: #8b5cf6;
+            --accent-green: #10b981;
+            --accent-orange: #f59e0b;
+            --accent-pink: #ec4899;
+            --accent-red: #ef4444;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            overflow: hidden;
+        }
+
+        .container {
+            display: flex;
+            height: 100vh;
+        }
+
+        /* Sidebar */
+        .sidebar {
+            width: 340px;
+            background: var(--bg-secondary);
+            border-right: 1px solid var(--border-color);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .sidebar-header {
+            padding: 20px;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .sidebar-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: var(--text-primary);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .sidebar-title-icon {
+            font-size: 22px;
+        }
+
+        .sidebar-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 16px;
+        }
+
+        .sidebar-content::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .sidebar-content::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        .sidebar-content::-webkit-scrollbar-thumb {
+            background: var(--border-color);
+            border-radius: 3px;
+        }
+
+        /* Sections */
+        .section {
+            margin-bottom: 20px;
+        }
+
+        .section-title {
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: var(--text-muted);
+            margin-bottom: 12px;
+        }
+
+        /* Entry Point List */
+        .entry-point-list {
+            background: var(--bg-tertiary);
+            border-radius: 8px;
+            max-height: 180px;
+            overflow-y: auto;
+        }
+
+        .entry-point-list::-webkit-scrollbar {
+            width: 4px;
+        }
+
+        .entry-point-list::-webkit-scrollbar-thumb {
+            background: var(--border-color);
+            border-radius: 2px;
+        }
+
+        .entry-point-item {
+            padding: 10px 12px;
+            border-bottom: 1px solid var(--border-color);
+            cursor: pointer;
+            transition: background 0.15s;
+            font-size: 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .entry-point-item:hover {
+            background: var(--bg-primary);
+        }
+
+        .entry-point-item:last-child {
+            border-bottom: none;
+        }
+
+        .entry-point-type {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 10px;
+            font-weight: 600;
+            flex-shrink: 0;
+        }
+
+        .entry-point-type.HTTP { background: rgba(239, 68, 68, 0.2); color: #ef4444; }
+        .entry-point-type.RPC { background: rgba(139, 92, 246, 0.2); color: #8b5cf6; }
+        .entry-point-type.MQ { background: rgba(245, 158, 11, 0.2); color: #f59e0b; }
+        .entry-point-type.SCHEDULED { background: rgba(16, 185, 129, 0.2); color: #10b981; }
+        .entry-point-type.EVENT { background: rgba(236, 72, 153, 0.2); color: #ec4899; }
+
+        .entry-point-name {
+            color: var(--text-secondary);
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        /* Type Filter */
+        .type-filter {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin-bottom: 12px;
+        }
+
+        .type-filter-btn {
+            padding: 4px 10px;
+            font-size: 11px;
+            border-radius: 12px;
+            border: 1px solid var(--border-color);
+            background: var(--bg-tertiary);
+            color: var(--text-secondary);
+            cursor: pointer;
+            transition: all 0.15s;
+            font-weight: 500;
+        }
+
+        .type-filter-btn:hover {
+            background: var(--bg-primary);
+            border-color: var(--accent-blue);
+        }
+
+        .type-filter-btn.active {
+            background: var(--accent-blue);
+            border-color: var(--accent-blue);
+            color: #fff;
+        }
+
+        /* Form Elements */
+        .form-group {
+            margin-bottom: 12px;
+        }
+
+        .form-group label {
+            display: block;
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin-bottom: 6px;
+            font-weight: 500;
+        }
+
+        .form-group input,
+        .form-group select {
+            width: 100%;
+            padding: 8px 12px;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+            font-size: 13px;
+            transition: border-color 0.15s;
+        }
+
+        .form-group input:focus,
+        .form-group select:focus {
+            outline: none;
+            border-color: var(--accent-blue);
+        }
+
+        .form-group input::placeholder {
+            color: var(--text-muted);
+        }
+
+        /* Buttons */
+        .btn {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 6px;
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+
+        .btn-primary {
+            background: var(--accent-blue);
+            color: #fff;
+        }
+
+        .btn-primary:hover {
+            background: #2563eb;
+        }
+
+        .btn-secondary {
+            background: var(--bg-tertiary);
+            color: var(--text-secondary);
+            border: 1px solid var(--border-color);
+        }
+
+        .btn-secondary:hover {
+            background: var(--border-color);
+            color: var(--text-primary);
+        }
+
+        .btn-group {
+            display: flex;
+            gap: 8px;
+        }
+
+        .btn-group .btn {
+            flex: 1;
+        }
+
+        /* Stats Panel */
+        .stats-panel {
+            background: var(--bg-tertiary);
+            border-radius: 8px;
+            padding: 12px;
+        }
+
+        .stats-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 6px 0;
+            border-bottom: 1px solid var(--border-color);
+            font-size: 12px;
+        }
+
+        .stats-row:last-child {
+            border-bottom: none;
+        }
+
+        .stats-label {
+            color: var(--text-muted);
+        }
+
+        .stats-value {
+            color: var(--text-primary);
+            font-weight: 600;
+        }
+
+        /* Legend */
+        .legend {
+            background: var(--bg-tertiary);
+            border-radius: 8px;
+            padding: 12px;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 8px;
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+
+        .legend-item:last-child {
+            margin-bottom: 0;
+        }
+
+        .legend-color {
+            width: 12px;
+            height: 12px;
+            border-radius: 3px;
+            flex-shrink: 0;
+        }
+
+        .legend-color.circle {
+            border-radius: 50%;
+        }
+
+        /* Details Panel */
+        .details-panel {
+            background: var(--bg-tertiary);
+            border-radius: 8px;
+            padding: 12px;
+            font-size: 12px;
+            line-height: 1.6;
+        }
+
+        .details-title {
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: 8px;
+        }
+
+        .details-row {
+            display: flex;
+            padding: 4px 0;
+        }
+
+        .details-label {
+            color: var(--text-muted);
+            min-width: 80px;
+        }
+
+        .details-value {
+            color: var(--text-secondary);
+            word-break: break-all;
+        }
+
+        /* Main Content */
+        .main-content {
+            flex: 1;
+            position: relative;
+            background: var(--bg-primary);
+            overflow: hidden;
+        }
+
+        #graph-svg {
+            width: 100%;
+            height: 100%;
+        }
+
+        /* Status Bar */
+        .status-bar {
+            position: absolute;
+            top: 16px;
+            left: 16px;
+            padding: 6px 14px;
+            background: rgba(17, 24, 39, 0.9);
+            border: 1px solid var(--border-color);
+            border-radius: 20px;
+            font-size: 12px;
+            color: var(--text-secondary);
+            z-index: 10;
+            backdrop-filter: blur(8px);
+        }
+
+        /* Tooltip */
+        .tooltip {
+            position: absolute;
+            pointer-events: none;
+            background: rgba(17, 24, 39, 0.98);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 12px;
+            font-size: 12px;
+            max-width: 320px;
+            z-index: 100;
+            opacity: 0;
+            transition: opacity 0.15s;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+        }
+
+        .tooltip-title {
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: 8px;
+            font-size: 13px;
+        }
+
+        .tooltip-row {
+            color: var(--text-muted);
+            margin: 3px 0;
+            font-size: 11px;
+        }
+
+        .tooltip-row span {
+            color: var(--text-secondary);
+        }
+
+        /* Loading Overlay */
+        .loading-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(11, 15, 25, 0.8);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 50;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.3s;
+        }
+
+        .loading-overlay.show {
+            opacity: 1;
+            pointer-events: auto;
+        }
+
+        .spinner {
+            width: 40px;
+            height: 40px;
+            border: 3px solid var(--border-color);
+            border-top-color: var(--accent-blue);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        .loading-text {
+            margin-top: 16px;
+            font-size: 13px;
+            color: var(--text-secondary);
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* Node and Link Labels */
+        .node-label {
+            fill: var(--text-primary);
+            font-size: 10px;
+            pointer-events: none;
+            user-select: none;
+            text-shadow: 0 1px 3px rgba(0,0,0,0.8);
+        }
+
+        /* Empty State */
+        .empty-state {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            color: var(--text-muted);
+            text-align: center;
+        }
+
+        .empty-state-icon {
+            font-size: 48px;
+            margin-bottom: 16px;
+            opacity: 0.5;
+        }
+
+        .empty-state-text {
+            font-size: 14px;
+            margin-bottom: 8px;
+        }
+
+        .empty-state-hint {
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+
+        /* Header Actions */
+        .header-actions {
+            display: flex;
+            gap: 8px;
+            margin-top: 12px;
+        }
+
+        .header-actions .btn {
+            flex: none;
+            padding: 6px 12px;
+            font-size: 12px;
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <aside class="sidebar">
+        <div class="sidebar-header">
+            <div class="sidebar-title">
+                <span class="sidebar-title-icon">🔗</span>
+                Impact Chain
+            </div>
+            <div class="header-actions">
+                <button class="btn btn-secondary" id="loadEntryPointsBtn">Load Points</button>
+                <button class="btn btn-primary" id="analyzeBtn">Analyze</button>
+            </div>
+        </div>
+
+        <div class="sidebar-content">
+            <!-- Entry Points Section -->
+            <div class="section">
+                <div class="section-title">Entry Points</div>
+                <div class="type-filter" id="typeFilter">
+                    <button class="type-filter-btn active" data-type="ALL">ALL</button>
+                    <button class="type-filter-btn" data-type="HTTP">HTTP</button>
+                    <button class="type-filter-btn" data-type="RPC">RPC</button>
+                    <button class="type-filter-btn" data-type="MQ">MQ</button>
+                    <button class="type-filter-btn" data-type="SCHEDULED">SCHED</button>
+                    <button class="type-filter-btn" data-type="EVENT">EVENT</button>
+                </div>
+                <div class="entry-point-list" id="entryPointList">
+                    <div class="entry-point-item" style="justify-content: center; color: var(--text-muted);">
+                        Click "Load Points" to load
+                    </div>
+                </div>
+            </div>
+
+            <!-- Graph Query Section -->
+            <div class="section">
+                <div class="section-title">Graph Query</div>
+                <div class="form-group">
+                    <label for="graphMode">Mode</label>
+                    <select id="graphMode">
+                        <option value="single">Single Entry Point</option>
+                        <option value="full">Full Graph</option>
+                    </select>
+                </div>
+                <div class="form-group" id="entryPointIdGroup">
+                    <label for="entryPointId">Entry Point ID</label>
+                    <input type="text" id="entryPointId" placeholder="HTTP:com.example.Controller#method()">
+                </div>
+                <div class="form-group">
+                    <label for="graphDepth">Depth</label>
+                    <input type="number" id="graphDepth" min="1" max="10" value="5">
+                </div>
+                <div class="btn-group">
+                    <button class="btn btn-primary" id="loadGraphBtn" style="flex: 2;">Load Graph</button>
+                    <button class="btn btn-secondary" id="refreshBtn" style="flex: 1;">↻</button>
+                </div>
+            </div>
+
+            <!-- Statistics Section -->
+            <div class="section">
+                <div class="section-title">Statistics</div>
+                <div class="stats-panel" id="statsPanel">
+                    <div class="stats-row">
+                        <span class="stats-label">Mode</span>
+                        <span class="stats-value" id="statMode">-</span>
+                    </div>
+                    <div class="stats-row">
+                        <span class="stats-label">Nodes</span>
+                        <span class="stats-value" id="statNodes">0</span>
+                    </div>
+                    <div class="stats-row">
+                        <span class="stats-label">Edges</span>
+                        <span class="stats-value" id="statEdges">0</span>
+                    </div>
+                    <div class="stats-row">
+                        <span class="stats-label">Entry Points</span>
+                        <span class="stats-value" id="statEntryPoints">0</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Legend Section -->
+            <div class="section">
+                <div class="section-title">Legend</div>
+                <div class="legend">
+                    <div class="legend-item">
+                        <div class="legend-color circle" style="background: #ef4444;"></div>
+                        <span>HTTP Entry Point</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-color circle" style="background: #8b5cf6;"></div>
+                        <span>RPC Entry Point</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-color circle" style="background: #f59e0b;"></div>
+                        <span>MQ Entry Point</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-color circle" style="background: #10b981;"></div>
+                        <span>Scheduled Entry Point</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-color circle" style="background: #ec4899;"></div>
+                        <span>Event Entry Point</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-color" style="background: #3b82f6;"></div>
+                        <span>Type/Class Node</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-color circle" style="background: #06b6d4;"></div>
+                        <span>Method Node</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Details Section -->
+            <div class="section">
+                <div class="section-title">Details</div>
+                <div class="details-panel" id="detailsPanel">
+                    <div style="color: var(--text-muted); text-align: center; padding: 20px 0;">
+                        Click a node or edge to see details
+                    </div>
+                </div>
+            </div>
+
+            <!-- Export Section -->
+            <div class="section">
+                <div class="section-title">Export</div>
+                <div class="btn-group">
+                    <button class="btn btn-secondary" id="exportDotBtn">DOT</button>
+                    <button class="btn btn-secondary" id="exportJsonBtn">JSON</button>
+                    <button class="btn btn-secondary" id="exportMermaidBtn">Mermaid</button>
+                </div>
+            </div>
+        </div>
+    </aside>
+
+    <main class="main-content">
+        <div class="status-bar" id="statusBar">Ready</div>
+        <svg id="graph-svg"></svg>
+        <div class="tooltip" id="tooltip"></div>
+        <div class="loading-overlay" id="loadingOverlay">
+            <div class="spinner"></div>
+            <div class="loading-text" id="loadingText">Loading...</div>
+        </div>
+    </main>
+</div>
+
+<script>
+// ==================== State ====================
+const state = {
+    nodes: [],
+    edges: [],
+    simulation: null,
+    zoom: null,
+    selectedNode: null,
+    selectedEdge: null,
+    entryPoints: [],
+    filteredEntryPoints: []
+};
+
+// ==================== DOM Elements ====================
+const els = {
+    statusBar: document.getElementById('statusBar'),
+    tooltip: document.getElementById('tooltip'),
+    loadingOverlay: document.getElementById('loadingOverlay'),
+    loadingText: document.getElementById('loadingText'),
+    entryPointList: document.getElementById('entryPointList'),
+    typeFilter: document.getElementById('typeFilter'),
+    graphMode: document.getElementById('graphMode'),
+    entryPointId: document.getElementById('entryPointId'),
+    graphDepth: document.getElementById('graphDepth'),
+    loadEntryPointsBtn: document.getElementById('loadEntryPointsBtn'),
+    analyzeBtn: document.getElementById('analyzeBtn'),
+    loadGraphBtn: document.getElementById('loadGraphBtn'),
+    refreshBtn: document.getElementById('refreshBtn'),
+    exportDotBtn: document.getElementById('exportDotBtn'),
+    exportJsonBtn: document.getElementById('exportJsonBtn'),
+    exportMermaidBtn: document.getElementById('exportMermaidBtn'),
+    statMode: document.getElementById('statMode'),
+    statNodes: document.getElementById('statNodes'),
+    statEdges: document.getElementById('statEdges'),
+    statEntryPoints: document.getElementById('statEntryPoints'),
+    detailsPanel: document.getElementById('detailsPanel')
+};
+
+// ==================== Utility Functions ====================
+function setStatus(text) {
+    els.statusBar.textContent = text;
+}
+
+function showLoading(text = 'Loading...') {
+    els.loadingText.textContent = text;
+    els.loadingOverlay.classList.add('show');
+}
+
+function hideLoading() {
+    els.loadingOverlay.classList.remove('show');
+}
+
+function showTooltip(event, content) {
+    els.tooltip.innerHTML = content;
+    els.tooltip.style.left = `${event.clientX + 12}px`;
+    els.tooltip.style.top = `${event.clientY + 12}px`;
+    els.tooltip.style.opacity = 1;
+}
+
+function hideTooltip() {
+    els.tooltip.style.opacity = 0;
+}
+
+function entryPointColor(type) {
+    const colors = {
+        'HTTP': '#ef4444',
+        'RPC': '#8b5cf6',
+        'MQ': '#f59e0b',
+        'SCHEDULED': '#10b981',
+        'EVENT': '#ec4899'
+    };
+    return colors[type] || '#64748b';
+}
+
+function nodeColor(node) {
+    if (node.isEntryPoint) {
+        return entryPointColor(node.kind);
+    }
+    if (node.type === 'METHOD') {
+        return '#06b6d4';
+    }
+    if (node.type === 'TYPE') {
+        return '#3b82f6';
+    }
+    return '#4b5563';
+}
+
+function edgeColor(type) {
+    const colors = {
+        'CALLS': '#f97316',
+        'DEPENDS_ON': '#22c55e',
+        'EXTENDS': '#a78bfa',
+        'IMPLEMENTS': '#a78bfa',
+        'ANNOTATED_BY': '#e879f9',
+        'INJECTS': '#f43f5e',
+        'INVOKES': '#fb923c',
+        'TRIGGERS': '#f472b6',
+        'DECLARES': '#14b8a6',
+        'CONSUMES': '#fbbf24',
+        'PUBLISHES': '#f472b6'
+    };
+    return colors[type] || '#6b7280';
+}
+
+// ==================== Entry Points ====================
+async function loadEntryPoints() {
+    showLoading('Loading entry points...');
+    setStatus('Loading entry points...');
+    
+    try {
+        const response = await fetch('/api/impact/entry-points');
+        if (!response.ok) throw new Error('Failed to load entry points');
+        
+        const data = await response.json();
+        state.entryPoints = data.entryPoints || [];
+        state.filteredEntryPoints = state.entryPoints;
+        
+        renderEntryPointList();
+        setStatus(`Loaded ${state.entryPoints.length} entry points`);
+    } catch (error) {
+        setStatus('Error: ' + error.message);
+        els.entryPointList.innerHTML = `<div class="entry-point-item" style="justify-content: center; color: #ef4444;">Error: ${error.message}</div>`;
+    } finally {
+        hideLoading();
+    }
+}
+
+function renderEntryPointList() {
+    if (state.filteredEntryPoints.length === 0) {
+        els.entryPointList.innerHTML = '<div class="entry-point-item" style="justify-content: center; color: var(--text-muted);">No entry points found</div>';
+        return;
+    }
+    
+    els.entryPointList.innerHTML = state.filteredEntryPoints.map(ep => `
+        <div class="entry-point-item" data-id="${ep.id}">
+            <span class="entry-point-type ${ep.type}">${ep.type}</span>
+            <span class="entry-point-name">${ep.className}#${ep.methodName}</span>
+        </div>
+    `).join('');
+    
+    els.entryPointList.querySelectorAll('.entry-point-item').forEach(item => {
+        item.addEventListener('click', () => {
+            const entryPointId = item.dataset.id;
+            els.entryPointId.value = entryPointId;
+            els.graphMode.value = 'single';
+            loadGraph();
+        });
+    });
+}
+
+function filterEntryPoints(type) {
+    if (type === 'ALL') {
+        state.filteredEntryPoints = state.entryPoints;
+    } else {
+        state.filteredEntryPoints = state.entryPoints.filter(ep => ep.type === type);
+    }
+    renderEntryPointList();
+}
+
+// ==================== Graph Loading ====================
+async function loadGraph() {
+    const mode = els.graphMode.value;
+    const entryPointId = els.entryPointId.value.trim();
+    const depth = parseInt(els.graphDepth.value) || 5;
+    
+    if (mode === 'single' && !entryPointId) {
+        alert('Please enter an Entry Point ID');
+        return;
+    }
+    
+    showLoading('Loading graph...');
+    setStatus('Loading graph...');
+    
+    try {
+        const payload = mode === 'single' 
+            ? { entryPointId, depth }
+            : { mode: 'full', depth, entryPointTypes: [] };
+        
+        const response = await fetch('/api/impact/graph', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(errorText || 'Failed to load graph');
+        }
+        
+        const result = await response.json();
+        renderGraph(result);
+        setStatus('Graph loaded');
+    } catch (error) {
+        setStatus('Error: ' + error.message);
+        console.error(error);
+    } finally {
+        hideLoading();
+    }
+}
+
+async function analyze() {
+    showLoading('Running analysis...');
+    setStatus('Running analysis...');
+    
+    try {
+        const response = await fetch('/api/impact/analyze', { method: 'POST' });
+        if (!response.ok) throw new Error('Analysis failed');
+        
+        const result = await response.json();
+        alert(`Analysis completed!\n\nEntry Points: ${result.entryPointCount}\nNodes: ${result.nodeCount}\nRelations: ${result.relationCount}`);
+        
+        loadEntryPoints();
+    } catch (error) {
+        setStatus('Error: ' + error.message);
+        alert('Analysis failed: ' + error.message);
+    } finally {
+        hideLoading();
+    }
+}
+
+// ==================== Graph Rendering ====================
+function renderGraph(result) {
+    d3.select('#graph-svg').selectAll('*').remove();
+    
+    const svg = d3.select('#graph-svg');
+    const width = svg.node().clientWidth;
+    const height = svg.node().clientHeight;
+    
+    state.nodes = result.nodes.map(n => ({...n}));
+    state.edges = result.edges.map(e => ({
+        ...e,
+        source: e.from,
+        target: e.to
+    }));
+    
+    const entryPointCount = state.nodes.filter(n => n.isEntryPoint).length;
+    
+    els.statMode.textContent = result.mode || 'single';
+    els.statNodes.textContent = result.nodeCount || state.nodes.length;
+    els.statEdges.textContent = result.edgeCount || state.edges.length;
+    els.statEntryPoints.textContent = entryPointCount;
+    
+    const zoomLayer = svg.append('g');
+    const linkGroup = zoomLayer.append('g');
+    const nodeGroup = zoomLayer.append('g');
+    const labelGroup = zoomLayer.append('g');
+    
+    svg.append('defs')
+        .append('marker')
+        .attr('id', 'arrow')
+        .attr('viewBox', '0 -5 10 10')
+        .attr('refX', 20)
+        .attr('refY', 0)
+        .attr('markerWidth', 6)
+        .attr('markerHeight', 6)
+        .attr('orient', 'auto')
+        .append('path')
+        .attr('fill', '#6b7280')
+        .attr('d', 'M0,-5L10,0L0,5');
+    
+    const zoom = d3.zoom()
+        .scaleExtent([0.1, 4])
+        .on('zoom', (event) => {
+            zoomLayer.attr('transform', event.transform);
+        });
+    
+    svg.call(zoom);
+    state.zoom = zoom;
+    
+    const links = linkGroup.selectAll('line')
+        .data(state.edges)
+        .join('line')
+        .attr('stroke', d => edgeColor(d.type))
+        .attr('stroke-opacity', 0.5)
+        .attr('stroke-width', 1.5)
+        .attr('marker-end', 'url(#arrow)')
+        .on('click', (event, d) => selectEdge(d))
+        .on('mousemove', (event, d) => {
+            showTooltip(event, `
+                <div class="tooltip-title">${d.type}</div>
+                <div class="tooltip-row">From: <span>${typeof d.source === 'object' ? d.source.label : d.from}</span></div>
+                <div class="tooltip-row">To: <span>${typeof d.target === 'object' ? d.target.label : d.to}</span></div>
+            `);
+        })
+        .on('mouseleave', hideTooltip);
+    
+    const nodes = nodeGroup.selectAll('circle')
+        .data(state.nodes)
+        .join('circle')
+        .attr('r', d => d.isEntryPoint ? 14 : 9)
+        .attr('fill', d => nodeColor(d))
+        .attr('stroke', '#1f2937')
+        .attr('stroke-width', 2)
+        .attr('cursor', 'pointer')
+        .attr('filter', 'drop-shadow(0 2px 4px rgba(0,0,0,0.3))')
+        .on('click', (event, d) => selectNode(d))
+        .on('mousemove', (event, d) => {
+            showTooltip(event, `
+                <div class="tooltip-title">${d.name}</div>
+                <div class="tooltip-row">Type: <span>${d.type}</span></div>
+                <div class="tooltip-row">FQN: <span>${d.fqn || '-'}</span></div>
+                <div class="tooltip-row">Module: <span>${d.module || '-'}</span></div>
+                ${d.isEntryPoint ? '<div class="tooltip-row" style="color: #f59e0b;">★ Entry Point</div>' : ''}
+            `);
+        })
+        .on('mouseleave', hideTooltip)
+        .call(d3.drag()
+            .on('start', dragStarted)
+            .on('drag', dragged)
+            .on('end', dragEnded));
+    
+    const labels = labelGroup.selectAll('text')
+        .data(state.nodes)
+        .join('text')
+        .attr('class', 'node-label')
+        .attr('dx', 16)
+        .attr('dy', 4)
+        .text(d => d.name);
+    
+    const simulation = d3.forceSimulation(state.nodes)
+        .force('link', d3.forceLink(state.edges)
+            .id(d => d.id)
+            .distance(120)
+            .strength(0.08))
+        .force('charge', d3.forceManyBody().strength(-400))
+        .force('center', d3.forceCenter(width / 2, height / 2))
+        .force('collision', d3.forceCollide().radius(d => d.isEntryPoint ? 18 : 13));
+    
+    simulation.on('tick', () => {
+        links
+            .attr('x1', d => d.source.x)
+            .attr('y1', d => d.source.y)
+            .attr('x2', d => d.target.x)
+            .attr('y2', d => d.target.y);
+        
+        nodes
+            .attr('cx', d => d.x)
+            .attr('cy', d => d.y);
+        
+        labels
+            .attr('x', d => d.x)
+            .attr('y', d => d.y);
+    });
+    
+    state.simulation = simulation;
+    
+    setTimeout(() => {
+        const scale = Math.min(width, height) / Math.max(width, height) * 0.7;
+        svg.transition().duration(500)
+            .call(
+                zoom.transform,
+                d3.zoomIdentity
+                    .translate(width / 2, height / 2)
+                    .scale(Math.min(scale, 1))
+                    .translate(-width / 2, -height / 2)
+            );
+    }, 100);
+}
+
+function selectNode(node) {
+    state.selectedNode = node;
+    state.selectedEdge = null;
+    
+    els.detailsPanel.innerHTML = `
+        <div class="details-title">${node.name}</div>
+        <div class="details-row"><span class="details-label">Type:</span><span class="details-value">${node.type}</span></div>
+        <div class="details-row"><span class="details-label">FQN:</span><span class="details-value">${node.fqn || '-'}</span></div>
+        <div class="details-row"><span class="details-label">Kind:</span><span class="details-value">${node.kind || '-'}</span></div>
+        <div class="details-row"><span class="details-label">Module:</span><span class="details-value">${node.module || '-'}</span></div>
+        <div class="details-row"><span class="details-label">File:</span><span class="details-value">${node.filePath || '-'}</span></div>
+        <div class="details-row"><span class="details-label">Entry Point:</span><span class="details-value">${node.isEntryPoint ? '<span style="color: #f59e0b;">★ Yes</span>' : 'No'}</span></div>
+    `;
+}
+
+function selectEdge(edge) {
+    state.selectedEdge = edge;
+    state.selectedNode = null;
+    
+    els.detailsPanel.innerHTML = `
+        <div class="details-title">${edge.type}</div>
+        <div class="details-row"><span class="details-label">From:</span><span class="details-value">${typeof edge.source === 'object' ? edge.source.id : edge.from}</span></div>
+        <div class="details-row"><span class="details-label">To:</span><span class="details-value">${typeof edge.target === 'object' ? edge.target.id : edge.to}</span></div>
+    `;
+}
+
+function dragStarted(event, d) {
+    if (!event.active) state.simulation.alphaTarget(0.3).restart();
+    d.fx = d.x;
+    d.fy = d.y;
+}
+
+function dragged(event, d) {
+    d.fx = event.x;
+    d.fy = event.y;
+}
+
+function dragEnded(event, d) {
+    if (!event.active) state.simulation.alphaTarget(0);
+    d.fx = d.x;
+    d.fy = d.y;
+}
+
+// ==================== Export Functions ====================
+async function exportGraph(format) {
+    const entryPointId = els.entryPointId.value.trim() || 'full';
+    const depth = els.graphDepth.value;
+    
+    const endpoints = {
+        'dot': `/api/impact/export/dot?entryPointId=${encodeURIComponent(entryPointId)}&depth=${depth}`,
+        'json': `/api/impact/export/json?entryPointId=${encodeURIComponent(entryPointId)}&depth=${depth}`,
+        'mermaid': `/api/impact/export/mermaid?entryPointId=${encodeURIComponent(entryPointId)}&depth=${depth}`
+    };
+    
+    const url = endpoints[format];
+    if (!url) return;
+    
+    try {
+        const response = await fetch(url);
+        if (!response.ok) throw new Error('Export failed');
+        
+        const content = await response.text();
+        const blob = new Blob([content], { type: 'text/plain' });
+        const blobUrl = URL.createObjectURL(blob);
+        
+        const a = document.createElement('a');
+        a.href = blobUrl;
+        a.download = `impact-graph.${format === 'dot' ? 'dot' : format === 'json' ? 'json' : 'md'}`;
+        a.click();
+        
+        URL.revokeObjectURL(blobUrl);
+    } catch (error) {
+        alert('Export failed: ' + error.message);
+    }
+}
+
+// ==================== Event Listeners ====================
+els.loadEntryPointsBtn.addEventListener('click', loadEntryPoints);
+els.analyzeBtn.addEventListener('click', analyze);
+els.loadGraphBtn.addEventListener('click', loadGraph);
+els.refreshBtn.addEventListener('click', loadGraph);
+
+els.graphMode.addEventListener('change', () => {
+    const isSingle = els.graphMode.value === 'single';
+    document.getElementById('entryPointIdGroup').style.display = isSingle ? 'block' : 'none';
+});
+
+els.typeFilter.querySelectorAll('button').forEach(btn => {
+    btn.addEventListener('click', () => {
+        els.typeFilter.querySelectorAll('button').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        filterEntryPoints(btn.dataset.type);
+    });
+});
+
+els.exportDotBtn.addEventListener('click', () => exportGraph('dot'));
+els.exportJsonBtn.addEventListener('click', () => exportGraph('json'));
+els.exportMermaidBtn.addEventListener('click', () => exportGraph('mermaid'));
+
+window.addEventListener('resize', () => {
+    const svg = d3.select('#graph-svg');
+    const width = svg.node().clientWidth;
+    const height = svg.node().clientHeight;
+    
+    if (state.simulation) {
+        state.simulation.force('center', d3.forceCenter(width / 2, height / 2));
+        state.simulation.alpha(0.3).restart();
+    }
+});
+
+setStatus('Ready');
+</script>
+</body>
+</html>

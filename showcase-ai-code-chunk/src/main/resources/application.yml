@@ -1,0 +1,48 @@
+server:
+  port: 8081
+
+app:
+  code-rag:
+    repo-name: showcase-pay
+    repo-root: /Users/yuhata/workspace/github/jdktomcater/showcase-pay
+    include-globs:
+      - "**/*.java"
+      - "**/*.xml"
+      - "**/*.yml"
+      - "**/*.yaml"
+      - "**/*.md"
+      - "**/*.sql"
+  impact-analysis:
+    repo-root: /Users/yuhata/workspace/github/jdktomcater/showcase-pay
+
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:6432/code_rag
+    username: postgres
+    password: ${DB_PASSWORD}
+
+  ai:
+    ollama:
+      base-url: ${OLLAMA_BASE_URL:http://localhost:11434}
+      init:
+        pull-model-strategy: when_missing
+      embedding:
+        options:
+          model: nomic-embed-text
+
+    vectorstore:
+      pgvector:
+        initialize-schema: true
+        dimensions: 768
+        index-type: hnsw
+        distance-type: cosine_distance
+
+logging:
+  level:
+    org.springframework.ai: INFO
+    com.jdktomcat.showcase.ai.code.chunk: DEBUG
+
+neo4j:
+  uri: ${NEO4J_URI:bolt://localhost:7687}
+  username: ${NEO4J_USERNAME:neo4j}
+  password: ${NEO4J_PASSWORD}

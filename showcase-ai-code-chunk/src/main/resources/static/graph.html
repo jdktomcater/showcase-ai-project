@@ -1,0 +1,598 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Code Graph Viewer</title>
+    <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
+    <style>
+        :root {
+            color-scheme: dark;
+            font-family: Arial, sans-serif;
+        }
+        body {
+            margin: 0;
+            background: #111827;
+            color: #e5e7eb;
+        }
+        .layout {
+            display: grid;
+            grid-template-columns: 340px 1fr;
+            height: 100vh;
+        }
+        .sidebar {
+            padding: 16px;
+            border-right: 1px solid #374151;
+            background: #0f172a;
+            overflow: auto;
+        }
+        .panel-title {
+            margin: 0 0 16px;
+            font-size: 18px;
+        }
+        .field {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            margin-bottom: 12px;
+        }
+        .field label {
+            font-size: 13px;
+            color: #cbd5e1;
+        }
+        .field input,
+        .field select,
+        .field button,
+        .field textarea {
+            border: 1px solid #475569;
+            background: #111827;
+            color: #f8fafc;
+            border-radius: 8px;
+            padding: 10px 12px;
+            font-size: 14px;
+        }
+        .field textarea {
+            min-height: 96px;
+            resize: vertical;
+        }
+        .field button {
+            background: #2563eb;
+            border: none;
+            cursor: pointer;
+            font-weight: 600;
+        }
+        .field button:hover {
+            background: #1d4ed8;
+        }
+        .hint,
+        .summary,
+        .details,
+        .legend {
+            margin-top: 16px;
+            padding: 12px;
+            border-radius: 8px;
+            background: #111827;
+            border: 1px solid #334155;
+            font-size: 13px;
+            line-height: 1.5;
+            white-space: pre-wrap;
+        }
+        .graph {
+            position: relative;
+            overflow: hidden;
+            background: #020617;
+        }
+        #network {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+        .status {
+            position: absolute;
+            top: 16px;
+            left: 16px;
+            padding: 8px 12px;
+            border-radius: 999px;
+            background: rgba(15, 23, 42, 0.85);
+            border: 1px solid #334155;
+            font-size: 12px;
+            z-index: 1;
+        }
+        .tooltip {
+            position: absolute;
+            pointer-events: none;
+            z-index: 2;
+            min-width: 180px;
+            max-width: 360px;
+            padding: 10px 12px;
+            border-radius: 8px;
+            border: 1px solid #334155;
+            background: rgba(15, 23, 42, 0.96);
+            color: #e5e7eb;
+            font-size: 12px;
+            line-height: 1.5;
+            opacity: 0;
+            transition: opacity 0.12s ease;
+            white-space: pre-wrap;
+        }
+        .legend-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 6px;
+        }
+        .swatch {
+            width: 10px;
+            height: 10px;
+            border-radius: 999px;
+        }
+        .swatch-square {
+            border-radius: 2px;
+        }
+        .swatch-diamond {
+            border-radius: 0;
+            transform: rotate(45deg);
+        }
+        .link-label {
+            fill: #94a3b8;
+            font-size: 9px;
+            pointer-events: none;
+            user-select: none;
+        }
+        .node-label {
+            fill: #e5e7eb;
+            font-size: 10px;
+            pointer-events: none;
+            user-select: none;
+        }
+    </style>
+</head>
+<body>
+<div class="layout">
+    <aside class="sidebar">
+        <h1 class="panel-title">依赖图可视化</h1>
+        <div class="field">
+            <label for="mode">模式</label>
+            <select id="mode">
+                <option value="dependencies">Dependencies</option>
+                <option value="impact">Impact</option>
+                <option value="classgraph">Full Class Graph</option>
+            </select>
+        </div>
+        <div class="field">
+            <label for="nodeType">节点类型</label>
+            <select id="nodeType">
+                <option value="TYPE">TYPE</option>
+                <option value="METHOD">METHOD</option>
+                <option value="ANNOTATION">ANNOTATION</option>
+            </select>
+        </div>
+        <div class="field">
+            <label for="fqn">FQN</label>
+            <textarea id="fqn" placeholder="例如：com.ruoyi.file.config.MinioConfig"></textarea>
+        </div>
+        <div class="field">
+            <label for="methodFqn">方法 FQN</label>
+            <textarea id="methodFqn" placeholder="例如：com.ruoyi.file.service.SysFileService#upload(MultipartFile)"></textarea>
+        </div>
+        <div class="field">
+            <label for="depth">深度</label>
+            <input id="depth" type="number" min="1" max="10" value="2">
+        </div>
+        <div class="field">
+            <button id="loadButton" type="button">加载图谱</button>
+        </div>
+        <div class="hint">`dependencies` 使用 `nodeType + fqn` 查询。`impact` 使用 `methodFqn` 查询调用影响链。`classgraph` 会全量加载 Neo4j 中所有类节点及类间依赖关系。</div>
+        <div class="legend">
+            <div class="legend-row"><span class="swatch" style="background:#f59e0b;"></span> 焦点节点</div>
+            <div class="legend-row"><span class="swatch" style="background:#34d399;"></span> 普通类</div>
+            <div class="legend-row"><span class="swatch swatch-square" style="background:#22c55e;"></span> 抽象类</div>
+            <div class="legend-row"><span class="swatch swatch-diamond" style="background:#14b8a6;"></span> 接口</div>
+            <div class="legend-row"><span class="swatch" style="background:#38bdf8;"></span> METHOD</div>
+            <div class="legend-row"><span class="swatch" style="background:#c084fc;"></span> ANNOTATION</div>
+        </div>
+        <div id="summary" class="summary">尚未加载图数据。</div>
+        <div id="details" class="details">点击节点或连线查看详情，拖拽节点可固定位置，滚轮可缩放。</div>
+    </aside>
+    <main class="graph">
+        <div id="status" class="status">Ready</div>
+        <svg id="network"></svg>
+        <div id="tooltip" class="tooltip"></div>
+    </main>
+</div>
+
+<script>
+    const modeInput = document.getElementById("mode");
+    const nodeTypeInput = document.getElementById("nodeType");
+    const fqnInput = document.getElementById("fqn");
+    const methodFqnInput = document.getElementById("methodFqn");
+    const depthInput = document.getElementById("depth");
+    const summaryEl = document.getElementById("summary");
+    const detailsEl = document.getElementById("details");
+    const statusEl = document.getElementById("status");
+    const loadButton = document.getElementById("loadButton");
+    const tooltipEl = document.getElementById("tooltip");
+
+    const svg = d3.select("#network");
+    const rootGroup = svg.append("g");
+    const defs = svg.append("defs");
+    const currentGraph = { nodes: [], edges: [] };
+    let simulation = null;
+    let zoomBehavior = null;
+    let activeNodeId = null;
+    let activeEdgeId = null;
+
+    defs.append("marker")
+        .attr("id", "arrow")
+        .attr("viewBox", "0 -5 10 10")
+        .attr("refX", 18)
+        .attr("refY", 0)
+        .attr("markerWidth", 6)
+        .attr("markerHeight", 6)
+        .attr("orient", "auto")
+        .append("path")
+        .attr("fill", "#64748b")
+        .attr("d", "M0,-5L10,0L0,5");
+
+    function setStatus(text) {
+        statusEl.textContent = text;
+    }
+
+    function nodeColor(node) {
+        if (node.focus) {
+            return "#f59e0b";
+        }
+        if (node.kind === "INTERFACE") {
+            return "#14b8a6";
+        }
+        if (node.kind === "ABSTRACT_CLASS") {
+            return "#22c55e";
+        }
+        switch (node.type) {
+            case "METHOD":
+                return "#38bdf8";
+            case "ANNOTATION":
+                return "#c084fc";
+            case "TYPE":
+                return "#34d399";
+            default:
+                return "#94a3b8";
+        }
+    }
+
+    function nodeSymbol(node) {
+        if (node.kind === "INTERFACE") {
+            return d3.symbolDiamond;
+        }
+        if (node.kind === "ABSTRACT_CLASS") {
+            return d3.symbolSquare;
+        }
+        if (node.type === "METHOD") {
+            return d3.symbolCircle;
+        }
+        return d3.symbolCircle;
+    }
+
+    function edgeColor(type) {
+        switch (type) {
+            case "CALLS":
+                return "#f97316";
+            case "DECLARES":
+                return "#22c55e";
+            case "EXTENDS":
+            case "IMPLEMENTS":
+                return "#a78bfa";
+            case "ANNOTATED_BY":
+                return "#e879f9";
+            case "RETURNS":
+            case "HAS_PARAM_TYPE":
+                return "#60a5fa";
+            case "INJECTS":
+                return "#f43f5e";
+            default:
+                return "#64748b";
+        }
+    }
+
+    function nodeRadius(node, largeGraphMode) {
+        if (node.focus) {
+            return largeGraphMode ? 8 : 10;
+        }
+        return largeGraphMode ? 4.5 : 6.5;
+    }
+
+    function buildPayload() {
+        return {
+            mode: modeInput.value,
+            nodeType: nodeTypeInput.value,
+            fqn: fqnInput.value.trim(),
+            methodFqn: methodFqnInput.value.trim(),
+            depth: Number(depthInput.value)
+        };
+    }
+
+    function updateModeFields() {
+        const impactMode = modeInput.value === "impact";
+        const classGraphMode = modeInput.value === "classgraph";
+        nodeTypeInput.disabled = impactMode || classGraphMode;
+        fqnInput.disabled = impactMode || classGraphMode;
+        methodFqnInput.disabled = !impactMode;
+        depthInput.disabled = classGraphMode;
+    }
+
+    function graphWidth() {
+        return document.querySelector(".graph").clientWidth;
+    }
+
+    function graphHeight() {
+        return document.querySelector(".graph").clientHeight;
+    }
+
+    function resizeSvg() {
+        svg.attr("width", graphWidth()).attr("height", graphHeight());
+    }
+
+    function hideTooltip() {
+        tooltipEl.style.opacity = 0;
+    }
+
+    function showTooltip(event, text) {
+        tooltipEl.textContent = text;
+        tooltipEl.style.left = `${event.clientX + 12}px`;
+        tooltipEl.style.top = `${event.clientY + 12}px`;
+        tooltipEl.style.opacity = 1;
+    }
+
+    function nodeDetails(node) {
+        return [
+            "Node",
+            `id: ${node.id}`,
+            `label: ${node.label}`,
+            `type: ${node.type}`,
+            `kind: ${node.kind || ""}`,
+            `fqn: ${node.fqn || ""}`,
+            `module: ${node.module || ""}`,
+            `file: ${node.filePath || ""}`,
+            `lines: ${node.startLine || ""}-${node.endLine || ""}`
+        ].join("\n");
+    }
+
+    function edgeDetails(edge) {
+        return [
+            "Edge",
+            `id: ${edge.id}`,
+            `from: ${typeof edge.source === "object" ? edge.source.id : edge.from}`,
+            `to: ${typeof edge.target === "object" ? edge.target.id : edge.to}`,
+            `type: ${edge.type}`
+        ].join("\n");
+    }
+
+    function applySelectionStyles() {
+        rootGroup.selectAll(".node-circle")
+            .attr("stroke", d => d.id === activeNodeId ? "#f8fafc" : "#0f172a")
+            .attr("stroke-width", d => d.id === activeNodeId ? 2.5 : 1.2);
+
+        rootGroup.selectAll(".link-line")
+            .attr("stroke-opacity", d => d.id === activeEdgeId ? 1 : 0.75)
+            .attr("stroke-width", d => d.id === activeEdgeId ? 2.6 : 1.2);
+    }
+
+    function renderGraph(result) {
+        const width = graphWidth();
+        const height = graphHeight();
+        const largeGraphMode = result.mode === "classgraph" || result.nodeCount > 300;
+        activeNodeId = null;
+        activeEdgeId = null;
+
+        if (simulation) {
+            simulation.stop();
+        }
+
+        rootGroup.selectAll("*").remove();
+        resizeSvg();
+
+        const nodes = result.nodes.map(node => ({...node}));
+        const edges = result.edges.map(edge => ({
+            ...edge,
+            source: edge.from,
+            target: edge.to
+        }));
+
+        currentGraph.nodes = nodes;
+        currentGraph.edges = edges;
+
+        const zoomLayer = rootGroup.append("g");
+        const linkGroup = zoomLayer.append("g");
+        const linkLabelGroup = zoomLayer.append("g");
+        const nodeGroup = zoomLayer.append("g");
+        const nodeLabelGroup = zoomLayer.append("g");
+
+        zoomBehavior = d3.zoom()
+            .scaleExtent([0.05, 8])
+            .on("zoom", event => {
+                zoomLayer.attr("transform", event.transform);
+            });
+
+        svg.call(zoomBehavior);
+
+        const link = linkGroup.selectAll("line")
+            .data(edges, d => d.id)
+            .join("line")
+            .attr("class", "link-line")
+            .attr("stroke", d => edgeColor(d.type))
+            .attr("stroke-opacity", 0.75)
+            .attr("stroke-width", 1.2)
+            .attr("marker-end", "url(#arrow)")
+            .on("click", function(event, d) {
+                event.stopPropagation();
+                activeEdgeId = d.id;
+                activeNodeId = null;
+                detailsEl.textContent = edgeDetails(d);
+                applySelectionStyles();
+            })
+            .on("mousemove", (event, d) => showTooltip(event, `${d.type}\n${typeof d.source === "object" ? d.source.id : d.from} -> ${typeof d.target === "object" ? d.target.id : d.to}`))
+            .on("mouseleave", hideTooltip);
+
+        const linkLabel = linkLabelGroup.selectAll("text")
+            .data(largeGraphMode ? [] : edges, d => d.id)
+            .join("text")
+            .attr("class", "link-label")
+            .text(d => d.type);
+
+        const node = nodeGroup.selectAll("path")
+            .data(nodes, d => d.id)
+            .join("path")
+            .attr("class", "node-circle")
+            .attr("d", d => d3.symbol()
+                .type(nodeSymbol(d))
+                .size(Math.PI * Math.pow(nodeRadius(d, largeGraphMode), 2) * 3.6)())
+            .attr("fill", d => nodeColor(d))
+            .attr("stroke", "#0f172a")
+            .attr("stroke-width", 1.2)
+            .on("click", function(event, d) {
+                event.stopPropagation();
+                activeNodeId = d.id;
+                activeEdgeId = null;
+                detailsEl.textContent = nodeDetails(d);
+                applySelectionStyles();
+            })
+            .on("mousemove", (event, d) => showTooltip(event, `${d.label}\n${d.fqn || d.id}`))
+            .on("mouseleave", hideTooltip)
+            .call(d3.drag()
+                .on("start", dragStarted)
+                .on("drag", dragged)
+                .on("end", dragEnded));
+
+        const nodeLabel = nodeLabelGroup.selectAll("text")
+            .data(nodes, d => d.id)
+            .join("text")
+            .attr("class", "node-label")
+            .style("display", d => largeGraphMode && !d.focus ? "none" : "block")
+            .text(d => d.label);
+
+        simulation = d3.forceSimulation(nodes)
+            .force("link", d3.forceLink(edges)
+                .id(d => d.id)
+                .distance(largeGraphMode ? 48 : 90)
+                .strength(largeGraphMode ? 0.09 : 0.18))
+            .force("charge", d3.forceManyBody().strength(largeGraphMode ? -18 : -160))
+            .force("center", d3.forceCenter(width / 2, height / 2))
+            .force("collision", d3.forceCollide().radius(d => nodeRadius(d, largeGraphMode) + (largeGraphMode ? 2 : 8)));
+
+        if (largeGraphMode) {
+            simulation.force("x", d3.forceX(width / 2).strength(0.012));
+            simulation.force("y", d3.forceY(height / 2).strength(0.012));
+        }
+
+        simulation.on("tick", () => {
+            link
+                .attr("x1", d => d.source.x)
+                .attr("y1", d => d.source.y)
+                .attr("x2", d => d.target.x)
+                .attr("y2", d => d.target.y);
+
+            node
+                .attr("transform", d => `translate(${d.x},${d.y})`);
+
+            nodeLabel
+                .attr("x", d => d.x + 8)
+                .attr("y", d => d.y + 4);
+
+            linkLabel
+                .attr("x", d => (d.source.x + d.target.x) / 2)
+                .attr("y", d => (d.source.y + d.target.y) / 2);
+        });
+
+        svg.on("click", () => {
+            activeNodeId = null;
+            activeEdgeId = null;
+            detailsEl.textContent = "点击节点或连线查看详情，拖拽节点可固定位置，滚轮可缩放。";
+            applySelectionStyles();
+        });
+
+        const initialScale = largeGraphMode ? 0.35 : 0.85;
+        svg.transition()
+            .duration(400)
+            .call(
+                zoomBehavior.transform,
+                d3.zoomIdentity
+                    .translate(width * (1 - initialScale) / 2, height * (1 - initialScale) / 2)
+                    .scale(initialScale)
+            );
+
+        summaryEl.textContent =
+            `mode: ${result.mode}\n` +
+            `target: ${result.target}\n` +
+            `depth: ${result.depth}\n` +
+            `nodes: ${result.nodeCount}\n` +
+            `edges: ${result.edgeCount}` +
+            (largeGraphMode ? `\nview: force-directed large graph mode` : "");
+
+        function dragStarted(event, d) {
+            if (!event.active) {
+                simulation.alphaTarget(0.18).restart();
+            }
+            d.fx = d.x;
+            d.fy = d.y;
+        }
+
+        function dragged(event, d) {
+            d.fx = event.x;
+            d.fy = event.y;
+        }
+
+        function dragEnded(event, d) {
+            if (!event.active) {
+                simulation.alphaTarget(0);
+            }
+            d.fx = d.x;
+            d.fy = d.y;
+        }
+    }
+
+    async function loadGraph() {
+        const payload = buildPayload();
+        setStatus("Loading...");
+        summaryEl.textContent = "正在加载图数据...";
+        detailsEl.textContent = "点击节点或连线查看详情，拖拽节点可固定位置，滚轮可缩放。";
+
+        try {
+            const response = await fetch("/api/code/graph/view", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify(payload)
+            });
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(errorText || "Request failed");
+            }
+
+            const result = await response.json();
+            renderGraph(result);
+            setStatus("Loaded");
+        } catch (error) {
+            setStatus("Error");
+            summaryEl.textContent = `加载失败: ${error.message}`;
+            rootGroup.selectAll("*").remove();
+        }
+    }
+
+    window.addEventListener("resize", () => {
+        resizeSvg();
+        if (simulation) {
+            simulation.force("center", d3.forceCenter(graphWidth() / 2, graphHeight() / 2));
+            simulation.alpha(0.25).restart();
+        }
+    });
+
+    loadButton.addEventListener("click", loadGraph);
+    modeInput.addEventListener("change", updateModeFields);
+
+    updateModeFields();
+    resizeSvg();
+</script>
+</body>
+</html>

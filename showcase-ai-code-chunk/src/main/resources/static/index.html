@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Code Visualization Hub</title>
+    <style>
+        :root {
+            --bg-primary: #0b0f19;
+            --bg-secondary: #111827;
+            --bg-card: #1f2937;
+            --border-color: #374151;
+            --text-primary: #f9fafb;
+            --text-secondary: #9ca3af;
+            --text-muted: #6b7280;
+            --accent-blue: #3b82f6;
+            --accent-purple: #8b5cf6;
+            --accent-cyan: #06b6d4;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: var(--bg-primary);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 40px 20px;
+        }
+
+        .container {
+            max-width: 1000px;
+            width: 100%;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 60px;
+        }
+
+        .header-title {
+            font-size: 42px;
+            font-weight: 700;
+            color: var(--text-primary);
+            margin-bottom: 12px;
+            letter-spacing: -0.5px;
+        }
+
+        .header-subtitle {
+            font-size: 16px;
+            color: var(--text-secondary);
+            font-weight: 400;
+        }
+
+        .cards {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+            gap: 24px;
+        }
+
+        .card {
+            background: linear-gradient(145deg, var(--bg-card) 0%, var(--bg-secondary) 100%);
+            border: 1px solid var(--border-color);
+            border-radius: 16px;
+            padding: 32px;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            cursor: pointer;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 3px;
+            background: linear-gradient(90deg, var(--accent-blue), var(--accent-purple));
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+
+        .card:hover {
+            transform: translateY(-8px);
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
+            border-color: var(--accent-blue);
+        }
+
+        .card:hover::before {
+            opacity: 1;
+        }
+
+        .card-icon {
+            font-size: 48px;
+            margin-bottom: 20px;
+            display: block;
+        }
+
+        .card-title {
+            color: var(--text-primary);
+            font-size: 22px;
+            font-weight: 600;
+            margin-bottom: 12px;
+            letter-spacing: -0.3px;
+        }
+
+        .card-desc {
+            color: var(--text-secondary);
+            font-size: 14px;
+            line-height: 1.7;
+            margin-bottom: 20px;
+        }
+
+        .card-features {
+            list-style: none;
+            margin-bottom: 24px;
+        }
+
+        .card-features li {
+            color: var(--text-secondary);
+            font-size: 13px;
+            padding: 6px 0;
+            padding-left: 24px;
+            position: relative;
+        }
+
+        .card-features li::before {
+            content: '✓';
+            position: absolute;
+            left: 0;
+            color: var(--accent-cyan);
+            font-weight: 600;
+            font-size: 14px;
+        }
+
+        .card-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            color: var(--accent-blue);
+            text-decoration: none;
+            font-weight: 500;
+            font-size: 14px;
+            transition: all 0.2s;
+        }
+
+        .card-link:hover {
+            color: var(--accent-purple);
+            gap: 12px;
+        }
+
+        .card-link::after {
+            content: '→';
+            transition: transform 0.2s;
+            font-size: 16px;
+        }
+
+        .card-link:hover::after {
+            transform: translateX(4px);
+        }
+
+        /* Background decoration */
+        .bg-decoration {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            overflow: hidden;
+            z-index: -1;
+        }
+
+        .bg-decoration::before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            left: -50%;
+            width: 200%;
+            height: 200%;
+            background: radial-gradient(circle at 20% 80%, rgba(59, 130, 246, 0.08) 0%, transparent 50%),
+                        radial-gradient(circle at 80% 20%, rgba(139, 92, 246, 0.08) 0%, transparent 50%);
+        }
+
+        /* Footer */
+        .footer {
+            text-align: center;
+            margin-top: 60px;
+            padding-top: 30px;
+            border-top: 1px solid var(--border-color);
+        }
+
+        .footer-text {
+            font-size: 13px;
+            color: var(--text-muted);
+        }
+    </style>
+</head>
+<body>
+    <div class="bg-decoration"></div>
+    
+    <div class="container">
+        <header class="header">
+            <h1 class="header-title">🔮 Code Visualization Hub</h1>
+            <p class="header-subtitle">Explore your codebase through interactive visualizations</p>
+        </header>
+        
+        <div class="cards">
+            <div class="card" onclick="location.href='/impact-chain.html'">
+                <span class="card-icon">🔗</span>
+                <h2 class="card-title">Impact Chain Visualization</h2>
+                <p class="card-desc">可视化代码影响链路，分析入口点及其依赖关系</p>
+                <ul class="card-features">
+                    <li>5 种入口点类型支持</li>
+                    <li>力导向图交互展示</li>
+                    <li>实时过滤和搜索</li>
+                    <li>支持 DOT/JSON/Mermaid 导出</li>
+                </ul>
+                <span class="card-link">Open Impact Chain</span>
+            </div>
+            
+            <div class="card" onclick="location.href='/graph.html'">
+                <span class="card-icon">🕸️</span>
+                <h2 class="card-title">Code Graph Viewer</h2>
+                <p class="card-desc">探索代码依赖图，查看类、方法、注解之间的关系</p>
+                <ul class="card-features">
+                    <li>TYPE/METHOD/ANNOTATION 节点</li>
+                    <li>多种依赖关系展示</li>
+                    <li>拖拽和缩放交互</li>
+                    <li>支持依赖/影响/全图模式</li>
+                </ul>
+                <span class="card-link">Open Code Graph</span>
+            </div>
+
+            <div class="card" onclick="location.href='/knowledge.html'">
+                <span class="card-icon">🧭</span>
+                <h2 class="card-title">Code Knowledge Explorer</h2>
+                <p class="card-desc">以 GitNexus 风格探索代码库：仓库概览、混合检索、grep 和文件片段读取</p>
+                <ul class="card-features">
+                    <li>仓库与图谱统计概览</li>
+                    <li>语义检索 + grep 混合搜索</li>
+                    <li>路径前缀过滤与正则 grep</li>
+                    <li>按行读取源码窗口</li>
+                </ul>
+                <span class="card-link">Open Knowledge Explorer</span>
+            </div>
+        </div>
+
+        <footer class="footer">
+            <p class="footer-text">Built with D3.js + Spring Boot + Neo4j</p>
+        </footer>
+    </div>
+</body>
+</html>

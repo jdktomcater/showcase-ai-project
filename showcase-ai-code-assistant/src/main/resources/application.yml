@@ -1,0 +1,63 @@
+server:
+  port: 8000
+
+github:
+  webhook:
+    secret: ${GITHUB_WEBHOOK_SECRET}
+  api:
+    token: ${GITHUB_API_TOKEN}
+  review:
+    max-diff-length: ${GITHUB_REVIEW_MAX_DIFF_LENGTH:8000}
+
+code-chunk:
+  base-url: ${CODE_CHUNK_BASE_URL:http://localhost:8081}
+  impact:
+    enabled: ${CODE_CHUNK_IMPACT_ENABLED:true}
+    depth: ${CODE_CHUNK_IMPACT_DEPTH:2}
+    max-types: ${CODE_CHUNK_IMPACT_MAX_TYPES:5}
+    max-items-per-type: ${CODE_CHUNK_IMPACT_MAX_ITEMS_PER_TYPE:5}
+
+telegram:
+  bot:
+    token: ${TELEGRAM_BOT_TOKEN}
+    chat-id: ${TELEGRAM_CHAT_ID:-5036565176}
+
+spring:
+  jackson:
+    serialization:
+      write-dates-as-timestamps: false
+    date-format: yyyy-MM-dd HH:mm:ss
+    time-zone: GMT+8
+  ai:
+    ollama:
+      init:
+        timeout: 60m
+        max-retries: 2
+        embedding:
+          additional-models:
+            - qwen3-coder:480b-cloud
+        pull-model-strategy: when_missing
+      baseUrl: ${OLLAMA_BASE_URL:http://localhost:11434}
+      embedding:
+        model: qwen3-coder:480b-cloud
+      chat:
+        options:
+          model: ${OLLAMA_CHAT_MODEL:gpt-oss:120b-cloud}
+          keep_alive: ${OLLAMA_CHAT_KEEP_ALIVE:30m}
+          temperature: ${OLLAMA_CHAT_TEMPERATURE:0.1}
+          num-predict: ${OLLAMA_CHAT_NUM_PREDICT:1200}
+          num-ctx: ${OLLAMA_CHAT_NUM_CTX:4096}
+
+app:
+  webhook:
+    executor:
+      core-pool-size: ${WEBHOOK_EXECUTOR_CORE_POOL_SIZE:1}
+      max-pool-size: ${WEBHOOK_EXECUTOR_MAX_POOL_SIZE:2}
+      queue-capacity: ${WEBHOOK_EXECUTOR_QUEUE_CAPACITY:20}
+
+
+# 日志配置（便于调试流程）
+logging:
+  level:
+    org.langchain4j: DEBUG
+    com.jdktomcat.showcase.ai.code.assistant: DEBUG
