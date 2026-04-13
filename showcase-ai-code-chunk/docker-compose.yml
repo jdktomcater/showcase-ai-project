@@ -1,10 +1,10 @@
 services:
   pgvector:
     image: pgvector/pgvector:pg16
-    container_name: code-rag-pgvector
+    container_name: code-chunk-pgvector
     restart: unless-stopped
     environment:
-      POSTGRES_DB: code_rag
+      POSTGRES_DB: code_chunk
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
     ports:
@@ -12,14 +12,14 @@ services:
     volumes:
       - pgvector_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d code_rag"]
+      test: ["CMD-SHELL", "pg_isready -U postgres -d code_chunk"]
       interval: 10s
       timeout: 5s
       retries: 10
 
   neo4j:
     image: neo4j:5
-    container_name: code-rag-neo4j
+    container_name: code-chunk-neo4j
     restart: unless-stopped
     environment:
       NEO4J_AUTH: neo4j/password
