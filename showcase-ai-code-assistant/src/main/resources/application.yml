@@ -33,15 +33,15 @@ spring:
   ai:
     ollama:
       init:
-        timeout: 60m
-        max-retries: 2
+        timeout: ${OLLAMA_INIT_TIMEOUT:30s}
+        max-retries: ${OLLAMA_INIT_MAX_RETRIES:0}
         embedding:
           additional-models:
             - qwen3-coder:480b-cloud
-        pull-model-strategy: when_missing
-      baseUrl: ${OLLAMA_BASE_URL:http://localhost:11434}
+        pull-model-strategy: never
+      base-url: ${OLLAMA_BASE_URL:http://localhost:11434}
       embedding:
-        model: qwen3-coder:480b-cloud
+        model: ${OLLAMA_EMBEDDING_MODEL:qwen3-coder:480b-cloud}
       chat:
         options:
           model: ${OLLAMA_CHAT_MODEL:gpt-oss:120b-cloud}
@@ -51,6 +51,10 @@ spring:
           num-ctx: ${OLLAMA_CHAT_NUM_CTX:4096}
 
 app:
+  ai:
+    review:
+      enabled: ${AI_REVIEW_ENABLED:true}
+      fail-open: ${AI_REVIEW_FAIL_OPEN:true}
   webhook:
     executor:
       core-pool-size: ${WEBHOOK_EXECUTOR_CORE_POOL_SIZE:1}

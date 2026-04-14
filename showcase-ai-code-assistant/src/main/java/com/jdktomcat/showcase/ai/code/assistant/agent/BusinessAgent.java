@@ -2,10 +2,10 @@ package com.jdktomcat.showcase.ai.code.assistant.agent;
 
 import com.jdktomcat.showcase.ai.code.assistant.domain.dto.CommitTaskState;
 import com.jdktomcat.showcase.ai.code.assistant.dto.AffectedEntryPoint;
+import com.jdktomcat.showcase.ai.code.assistant.service.ai.ReviewChatService;
 import com.jdktomcat.showcase.ai.code.assistant.service.impact.CodeImpactAnalysisService;
 import lombok.extern.slf4j.Slf4j;
 import org.bsc.langgraph4j.action.NodeAction;
-import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
@@ -15,11 +15,11 @@ import java.util.Map;
 @Component
 public class BusinessAgent implements NodeAction<CommitTaskState> {
 
-    private final ChatModel chatModel;
+    private final ReviewChatService reviewChatService;
     private final CodeImpactAnalysisService impactAnalysisService;
 
-    public BusinessAgent(ChatModel chatModel, CodeImpactAnalysisService impactAnalysisService) {
-        this.chatModel = chatModel;
+    public BusinessAgent(ReviewChatService reviewChatService, CodeImpactAnalysisService impactAnalysisService) {
+        this.reviewChatService = reviewChatService;
         this.impactAnalysisService = impactAnalysisService;
     }
 
@@ -72,7 +72,20 @@ public class BusinessAgent implements NodeAction<CommitTaskState> {
                 formatAffectedEntryPoints(state.getAffectedEntryPoints()),
                 state.getCodeImpactSummary(),
                 state.getDiff());
-        String review = chatModel.call(prompt);
+        String review = reviewChatService.callOrFallback(
+                "business-review",
+                prompt,
+                () -> """
+                        ## 结论
+                        风险等级：低风险
+
+                        ## 发现
+                        - AI 模型当前不可用，未完成自动业务风险审查
+
+                        ## 建议
+                        - 可先依据影响入口点和代码影响面评估报告做人工复核，模型恢复后重新审查
+                        """
+        );
 //        log.info("业务完整审查完成，报告长度 {} 字", review.length());
         log.info("业务完整审查完成，报告： {} ", review);
         state.setBusinessReport(review);

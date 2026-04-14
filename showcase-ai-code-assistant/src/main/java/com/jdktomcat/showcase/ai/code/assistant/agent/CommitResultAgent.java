@@ -2,10 +2,10 @@ package com.jdktomcat.showcase.ai.code.assistant.agent;
 
 import com.jdktomcat.showcase.ai.code.assistant.domain.dto.CommitTaskState;
 import com.jdktomcat.showcase.ai.code.assistant.dto.AffectedEntryPoint;
+import com.jdktomcat.showcase.ai.code.assistant.service.ai.ReviewChatService;
 import com.jdktomcat.showcase.ai.code.assistant.utils.JSONUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.bsc.langgraph4j.action.NodeAction;
-import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
@@ -19,10 +19,10 @@ import java.util.Objects;
 @Slf4j
 public class CommitResultAgent implements NodeAction<CommitTaskState> {
 
-    private final ChatModel chatModel;
+    private final ReviewChatService reviewChatService;
 
-    public CommitResultAgent(ChatModel chatModel) {
-        this.chatModel = chatModel;
+    public CommitResultAgent(ReviewChatService reviewChatService) {
+        this.reviewChatService = reviewChatService;
     }
 
     public void validate(CommitTaskState state) {
@@ -84,7 +84,18 @@ public class CommitResultAgent implements NodeAction<CommitTaskState> {
                 state.getPerformanceReport(),
                 state.getSecurityReport()
         );
-        String validationResult = chatModel.call(prompt);
+        String validationResult = reviewChatService.callOrFallback(
+                "final-decision",
+                prompt,
+                () -> """
+                        {
+                          "decision": "PASS",
+                          "summary": "AI 模型当前不可用，已返回降级评审结果，请结合专项报告人工复核",
+                          "finalReport": "## 总体结论\\nPASS\\n\\n## 关键风险\\n- AI 模型当前不可用，最终结论基于降级逻辑生成。\\n- 业务、性能、安全专项报告可能为兜底内容，需要人工复核。\\n\\n## 建议动作\\n- 检查 OLLAMA_BASE_URL、OLLAMA_CHAT_MODEL 或切换到可用云模型后重新执行评审。\\n- 在模型恢复前，将本次评审视为非阻断参考结果。",
+                          "telegramMessage": "结论: PASS\\n原因: AI 模型当前不可用，已返回降级评审结果，请人工复核。"
+                        }
+                        """
+        );
         log.info("提交裁决原始结果：{}", validationResult);
         Map<String, Object> result;
         try {

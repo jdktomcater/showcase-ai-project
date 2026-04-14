@@ -1,9 +1,9 @@
 package com.jdktomcat.showcase.ai.code.assistant.agent;
 
 import com.jdktomcat.showcase.ai.code.assistant.domain.dto.CommitTaskState;
+import com.jdktomcat.showcase.ai.code.assistant.service.ai.ReviewChatService;
 import lombok.extern.slf4j.Slf4j;
 import org.bsc.langgraph4j.action.NodeAction;
-import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.stereotype.Component;
 
 import java.util.Map;
@@ -12,10 +12,10 @@ import java.util.Map;
 @Component
 public class SecurityAgent implements NodeAction<CommitTaskState> {
 
-    private final ChatModel chatModel;
+    private final ReviewChatService reviewChatService;
 
-    public SecurityAgent(ChatModel chatModel) {
-        this.chatModel = chatModel;
+    public SecurityAgent(ReviewChatService reviewChatService) {
+        this.reviewChatService = reviewChatService;
     }
 
     /**
@@ -43,7 +43,20 @@ public class SecurityAgent implements NodeAction<CommitTaskState> {
                 %s
                 """, state.getRepository(), state.getBranch(), state.getMessage(), state.getDiff());
 
-        String review = chatModel.call(prompt);
+        String review = reviewChatService.callOrFallback(
+                "security-review",
+                prompt,
+                () -> """
+                        ## 结论
+                        风险等级：低风险
+
+                        ## 发现
+                        - AI 模型当前不可用，未完成自动安全审查
+
+                        ## 建议
+                        - 模型恢复后重新执行安全审查，并人工关注鉴权、注入和敏感信息处理
+                        """
+        );
         log.info("安全审查完成，报告长度 {} 字", review.length());
         state.setSecurityReport(review);
     }

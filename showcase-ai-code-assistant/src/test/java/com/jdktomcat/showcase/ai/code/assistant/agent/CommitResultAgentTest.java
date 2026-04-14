@@ -2,8 +2,11 @@ package com.jdktomcat.showcase.ai.code.assistant.agent;
 
 import com.jdktomcat.showcase.ai.code.assistant.domain.dto.CommitTaskState;
 import com.jdktomcat.showcase.ai.code.assistant.dto.AffectedEntryPoint;
+import com.jdktomcat.showcase.ai.code.assistant.service.ai.ReviewChatService;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.support.DefaultListableBeanFactory;
 import org.springframework.ai.chat.model.ChatModel;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.List;
 
@@ -26,7 +29,13 @@ class CommitResultAgentTest {
                 }
                 """);
 
-        CommitResultAgent agent = new CommitResultAgent(chatModel);
+        DefaultListableBeanFactory beanFactory = new DefaultListableBeanFactory();
+        beanFactory.registerSingleton("chatModel", chatModel);
+        ReviewChatService reviewChatService = new ReviewChatService(beanFactory.getBeanProvider(ChatModel.class));
+        ReflectionTestUtils.setField(reviewChatService, "aiReviewEnabled", true);
+        ReflectionTestUtils.setField(reviewChatService, "failOpen", true);
+
+        CommitResultAgent agent = new CommitResultAgent(reviewChatService);
         CommitTaskState state = new CommitTaskState();
         state.setRepository("jdktomcater/showcase-pay");
         state.setAffectedEntryPoints(List.of(
