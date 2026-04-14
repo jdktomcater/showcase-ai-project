@@ -13,9 +13,11 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -265,7 +267,12 @@ public class CodeImpactAnalysisService {
                 matched.addAll(matchEntryPointsByImpactChain(allEntryPoints, changedContext, matched));
             }
 
-            return prioritizeEntryPoints(new ArrayList<>(matched));
+            List<EntryPointInfo> prioritized = prioritizeEntryPoints(new ArrayList<>(matched));
+            if (!prioritized.isEmpty()) {
+                return prioritized;
+            }
+
+            return heuristicEntryPointMatch(allEntryPoints, changedContext);
         } catch (Exception e) {
             log.warn("获取入口点列表失败", e);
             return List.of();
@@ -343,6 +350,77 @@ public class CodeImpactAnalysisService {
         return entryPoints.stream()
                 .filter(entryPoint -> !hasHttp || "HTTP".equalsIgnoreCase(entryPoint.getType()))
                 .limit(maxTypes)
+                .toList();
+    }
+
+    private List<EntryPointInfo> heuristicEntryPointMatch(
+            List<EntryPointInfo> allEntryPoints,
+            ChangedCodeContext changedContext
+    ) {
+        Set<String> changedTokens = buildChangedContextTokens(changedContext);
+        if (changedTokens.isEmpty()) {
+            return List.of();
+        }
+
+        return allEntryPoints.stream()
+                .map(entryPoint -> Map.entry(entryPoint, scoreEntryPoint(entryPoint, changedTokens)))
+                .filter(entry -> entry.getValue() > 0)
+                .sorted(Map.Entry.<EntryPointInfo, Integer>comparingByValue(Comparator.reverseOrder())
+                        .thenComparing(entry -> entryPointPriority(entry.getKey()))
+                        .thenComparing(entry -> entry.getKey().getId()))
+                .map(Map.Entry::getKey)
+                .filter(entryPoint -> "HTTP".equalsIgnoreCase(entryPoint.getType()))
+                .limit(maxTypes)
+                .toList();
+    }
+
+    private Set<String> buildChangedContextTokens(ChangedCodeContext changedContext) {
+        Set<String> tokens = new LinkedHashSet<>();
+        changedContext.typeFqns().forEach(value -> tokens.addAll(tokenize(value)));
+        changedContext.methodFqns().forEach(value -> tokens.addAll(tokenize(value)));
+        changedContext.filePaths().forEach(value -> tokens.addAll(tokenize(value)));
+        return tokens;
+    }
+
+    private int scoreEntryPoint(EntryPointInfo entryPoint, Set<String> changedTokens) {
+        Set<String> entryPointTokens = new LinkedHashSet<>();
+        entryPointTokens.addAll(tokenize(entryPoint.getClassName()));
+        entryPointTokens.addAll(tokenize(entryPoint.getMethodName()));
+        entryPointTokens.addAll(tokenize(entryPoint.getMethodSignature()));
+        entryPointTokens.addAll(tokenize(formatRoute(entryPoint)));
+
+        int score = 0;
+        for (String token : entryPointTokens) {
+            if (changedTokens.contains(token)) {
+                score += switch (token) {
+                    case "create", "update", "cancel", "query", "order", "pay", "refund" -> 3;
+                    default -> 1;
+                };
+            }
+        }
+
+        if ("HTTP".equalsIgnoreCase(entryPoint.getType()) && hasRoute(entryPoint)) {
+            score += 2;
+        }
+        return score;
+    }
+
+    private List<String> tokenize(String value) {
+        if (value == null || value.isBlank()) {
+            return List.of();
+        }
+        String normalized = value
+                .replace('#', ' ')
+                .replace('/', ' ')
+                .replace('.', ' ')
+                .replace('-', ' ')
+                .replace('_', ' ')
+                .replaceAll("([a-z0-9])([A-Z])", "$1 $2")
+                .toLowerCase(Locale.ROOT);
+        return Pattern.compile("\\s+")
+                .splitAsStream(normalized)
+                .filter(token -> !token.isBlank())
+                .filter(token -> token.length() > 1)
                 .toList();
     }
 
