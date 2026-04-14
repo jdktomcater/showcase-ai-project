@@ -13,11 +13,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 
 import java.util.ArrayList;
-import java.util.Comparator;
+import java.util.ArrayDeque;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -31,11 +30,6 @@ import java.util.regex.Pattern;
 public class CodeImpactAnalysisService {
 
     private static final Pattern DIFF_HUNK_PATTERN = Pattern.compile("@@ -\\d+(?:,\\d+)? \\+(\\d+)(?:,(\\d+))? @@");
-    private static final Set<String> ACTION_TOKENS = Set.of(
-            "create", "cancel", "update", "delete", "remove", "refund", "pay",
-            "submit", "confirm", "close", "open", "list", "query", "detail",
-            "health", "sync", "retry"
-    );
 
     private final RestTemplate restTemplate;
 
@@ -157,8 +151,8 @@ public class CodeImpactAnalysisService {
         }
 
         ChangedCodeContext changedContext = resolveChangedCodeContext(compareResponse.getFiles());
-        if (changedContext.typeFqns().isEmpty() && changedContext.methodFqns().isEmpty()) {
-            return new ImpactChainAnalysis("未包含可映射到 Java 类型的变更。", List.of());
+        if (changedContext.methodFqns().isEmpty()) {
+            return new ImpactChainAnalysis("未识别到可回溯调用链的变更方法。", List.of());
         }
 
         List<EntryPointInfo> entryPoints = findRelatedEntryPoints(changedContext);
@@ -168,7 +162,6 @@ public class CodeImpactAnalysisService {
 
         StringBuilder summary = new StringBuilder("## 业务影响链路摘要\n");
         summary.append("- 仓库：").append(safe(repository)).append('\n');
-        summary.append("- 变更类型数：").append(changedContext.typeFqns().size()).append('\n');
         summary.append("- 变更方法数：").append(changedContext.methodFqns().size()).append('\n');
 
         if (entryPoints.isEmpty()) {
@@ -224,122 +217,68 @@ public class CodeImpactAnalysisService {
                 }
             }
 
-            Set<EntryPointInfo> matched = new LinkedHashSet<>();
-            for (String methodFqn : changedContext.methodFqns()) {
-                EntryPointInfo directEntryPoint = entryPointByMethod.get(methodFqn);
-                if (directEntryPoint != null) {
-                    matched.add(directEntryPoint);
-                }
-
-                ImpactResponse impactResponse = fetchMethodImpact(methodFqn);
-                for (Map<String, Object> impact : impactResponse.getImpacts()) {
-                    String callerMethod = safe(impact.get("fqn"));
-                    EntryPointInfo callerEntryPoint = entryPointByMethod.get(callerMethod);
-                    if (callerEntryPoint != null) {
-                        matched.add(callerEntryPoint);
-                    }
-                    if (matched.size() >= maxTypes) {
-                        return new ArrayList<>(matched);
-                    }
-                }
-            }
-
-            Set<String> relatedTypes = new LinkedHashSet<>(changedContext.typeFqns());
-            for (String typeFqn : changedContext.typeFqns()) {
-                ImpactResponse impactResponse = fetchTypeImpact(typeFqn);
-                for (Map<String, Object> impact : impactResponse.getImpacts()) {
-                    relatedTypes.add(safe(impact.get("fqn")));
-                    if (relatedTypes.size() >= maxTypes * 2) {
-                        break;
-                    }
-                }
-            }
-
-            for (String typeFqn : relatedTypes) {
-                for (EntryPointInfo entryPoint : allEntryPoints) {
-                    if (entryPoint.getClassName().equals(typeFqn) ||
-                        entryPoint.getClassName().startsWith(typeFqn + "$") ||
-                        typeFqn.contains(entryPoint.getClassName())) {
-                        matched.add(entryPoint);
-                    }
-                }
-                if (matched.size() >= maxTypes) {
-                    break;
-                }
-            }
-
-            if (matched.size() < maxTypes) {
-                matched.addAll(matchEntryPointsByImpactChain(allEntryPoints, changedContext, matched));
-            }
-
-            List<EntryPointInfo> prioritized = prioritizeEntryPoints(new ArrayList<>(matched), changedContext);
-            if (!prioritized.isEmpty()) {
-                return prioritized;
-            }
-
-            return heuristicEntryPointMatch(allEntryPoints, changedContext);
+            return traceEntryPointsByCallGraph(changedContext.methodFqns(), entryPointByMethod);
         } catch (Exception e) {
             log.warn("获取入口点列表失败", e);
             return List.of();
         }
     }
 
-    private List<EntryPointInfo> matchEntryPointsByImpactChain(
-            List<EntryPointInfo> allEntryPoints,
-            ChangedCodeContext changedContext,
-            Set<EntryPointInfo> alreadyMatched
+    private List<EntryPointInfo> traceEntryPointsByCallGraph(
+            List<String> changedMethods,
+            Map<String, EntryPointInfo> entryPointByMethod
     ) {
-        List<EntryPointInfo> matched = new ArrayList<>();
-        for (EntryPointInfo entryPoint : allEntryPoints) {
-            if (alreadyMatched.contains(entryPoint)) {
+        Set<EntryPointInfo> matched = new LinkedHashSet<>();
+        Set<String> visitedMethods = new LinkedHashSet<>();
+        ArrayDeque<MethodTraceNode> queue = new ArrayDeque<>();
+
+        for (String methodFqn : changedMethods) {
+            if (methodFqn == null || methodFqn.isBlank()) {
                 continue;
             }
-            try {
-                ImpactChainResult chainResult = fetchImpactChain(entryPoint.getId());
-                if (matchesChangedContext(entryPoint, chainResult, changedContext)) {
-                    matched.add(entryPoint);
+            EntryPointInfo directEntryPoint = entryPointByMethod.get(methodFqn);
+            if (directEntryPoint != null) {
+                matched.add(directEntryPoint);
+            }
+            if (visitedMethods.add(methodFqn)) {
+                queue.addLast(new MethodTraceNode(methodFqn, 0));
+            }
+        }
+
+        while (!queue.isEmpty() && matched.size() < maxTypes) {
+            MethodTraceNode current = queue.removeFirst();
+            if (current.depth() >= impactDepth) {
+                continue;
+            }
+
+            ImpactResponse impactResponse = fetchMethodImpact(current.methodFqn());
+            for (Map<String, Object> impact : impactResponse.getImpacts()) {
+                String callerMethod = safe(impact.get("fqn"));
+                if (callerMethod.isBlank() || "-".equals(callerMethod)) {
+                    continue;
                 }
-            } catch (Exception ex) {
-                log.debug("按影响链路回溯入口点失败 entryPointId={}", entryPoint.getId(), ex);
-            }
-            if (alreadyMatched.size() + matched.size() >= maxTypes * 2) {
-                break;
+
+                EntryPointInfo callerEntryPoint = entryPointByMethod.get(callerMethod);
+                if (callerEntryPoint != null) {
+                    matched.add(callerEntryPoint);
+                    if (matched.size() >= maxTypes) {
+                        break;
+                    }
+                }
+
+                if (visitedMethods.add(callerMethod)) {
+                    queue.addLast(new MethodTraceNode(callerMethod, current.depth() + 1));
+                }
             }
         }
-        return matched;
+
+        return prioritizeStrictEntryPoints(new ArrayList<>(matched));
     }
 
-    private boolean matchesChangedContext(
-            EntryPointInfo entryPoint,
-            ImpactChainResult chainResult,
-            ChangedCodeContext changedContext
-    ) {
-        if (entryPoint.getMethodSignature() != null && changedContext.methodFqns().contains(entryPoint.getMethodSignature())) {
-            return true;
-        }
-        if (entryPoint.getClassName() != null && changedContext.typeFqns().contains(entryPoint.getClassName())) {
-            return true;
-        }
-
-        for (Map<String, Object> node : chainResult.getImpactChain()) {
-            String fqn = safe(node.get("fqn"));
-            String filePath = safe(node.get("filePath"));
-            if (changedContext.methodFqns().contains(fqn)
-                    || changedContext.typeFqns().contains(fqn)
-                    || changedContext.filePaths().contains(filePath)
-                    || changedContext.typeFqns().stream().anyMatch(type -> fqn.startsWith(type + "#"))) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private List<EntryPointInfo> prioritizeEntryPoints(List<EntryPointInfo> entryPoints, ChangedCodeContext changedContext) {
+    private List<EntryPointInfo> prioritizeStrictEntryPoints(List<EntryPointInfo> entryPoints) {
         if (entryPoints.isEmpty()) {
             return List.of();
         }
-
-        Set<String> changedActionTokens = extractChangedActionTokens(changedContext);
 
         entryPoints.sort((left, right) -> {
             int typeCompare = Integer.compare(entryPointPriority(left), entryPointPriority(right));
@@ -354,126 +293,9 @@ public class CodeImpactAnalysisService {
         });
 
         boolean hasHttp = entryPoints.stream().anyMatch(entryPoint -> "HTTP".equalsIgnoreCase(entryPoint.getType()));
-        List<EntryPointInfo> prioritized = entryPoints.stream()
+        return entryPoints.stream()
                 .filter(entryPoint -> !hasHttp || "HTTP".equalsIgnoreCase(entryPoint.getType()))
-                .toList();
-        if (!changedActionTokens.isEmpty()) {
-            List<EntryPointInfo> actionMatched = prioritized.stream()
-                    .filter(entryPoint -> matchesActionTokens(entryPoint, changedActionTokens))
-                    .toList();
-            if (!actionMatched.isEmpty()) {
-                return actionMatched.stream().limit(maxTypes).toList();
-            }
-        }
-        return prioritized.stream().limit(maxTypes).toList();
-    }
-
-    private List<EntryPointInfo> heuristicEntryPointMatch(
-            List<EntryPointInfo> allEntryPoints,
-            ChangedCodeContext changedContext
-    ) {
-        Set<String> changedTokens = buildChangedContextTokens(changedContext);
-        Set<String> changedActionTokens = extractChangedActionTokens(changedContext);
-        if (changedTokens.isEmpty()) {
-            return List.of();
-        }
-
-        List<Map.Entry<EntryPointInfo, Integer>> scored = allEntryPoints.stream()
-                .filter(entryPoint -> "HTTP".equalsIgnoreCase(entryPoint.getType()))
-                .filter(entryPoint -> changedActionTokens.isEmpty() || matchesActionTokens(entryPoint, changedActionTokens))
-                .map(entryPoint -> Map.entry(entryPoint, scoreEntryPoint(entryPoint, changedTokens)))
-                .filter(entry -> entry.getValue() > 0)
-                .sorted(Map.Entry.<EntryPointInfo, Integer>comparingByValue(Comparator.reverseOrder())
-                        .thenComparing(entry -> entryPointPriority(entry.getKey()))
-                        .thenComparing(entry -> entry.getKey().getId()))
-                .toList();
-
-        if (scored.isEmpty()) {
-            return List.of();
-        }
-
-        int bestScore = scored.get(0).getValue();
-        return scored.stream()
-                .filter(entry -> entry.getValue() == bestScore)
-                .map(Map.Entry::getKey)
-                .limit(1)
-                .toList();
-    }
-
-    private Set<String> buildChangedContextTokens(ChangedCodeContext changedContext) {
-        Set<String> tokens = new LinkedHashSet<>();
-        changedContext.typeFqns().forEach(value -> tokens.addAll(tokenize(value)));
-        changedContext.methodFqns().forEach(value -> tokens.addAll(tokenize(value)));
-        changedContext.filePaths().forEach(value -> tokens.addAll(tokenize(value)));
-        return tokens;
-    }
-
-    private int scoreEntryPoint(EntryPointInfo entryPoint, Set<String> changedTokens) {
-        Set<String> entryPointTokens = new LinkedHashSet<>();
-        entryPointTokens.addAll(tokenize(entryPoint.getClassName()));
-        entryPointTokens.addAll(tokenize(entryPoint.getMethodName()));
-        entryPointTokens.addAll(tokenize(entryPoint.getMethodSignature()));
-        entryPointTokens.addAll(tokenize(formatRoute(entryPoint)));
-
-        int score = 0;
-        for (String token : entryPointTokens) {
-            if (changedTokens.contains(token)) {
-                score += switch (token) {
-                    case "create", "update", "cancel", "query", "order", "pay", "refund" -> 3;
-                    default -> 1;
-                };
-            }
-        }
-
-        if ("HTTP".equalsIgnoreCase(entryPoint.getType()) && hasRoute(entryPoint)) {
-            score += 2;
-        }
-        return score;
-    }
-
-    private Set<String> extractChangedActionTokens(ChangedCodeContext changedContext) {
-        Set<String> tokens = new LinkedHashSet<>();
-        changedContext.methodFqns().forEach(value -> tokenize(value).stream()
-                .filter(ACTION_TOKENS::contains)
-                .forEach(tokens::add));
-        changedContext.typeFqns().forEach(value -> tokenize(value).stream()
-                .filter(ACTION_TOKENS::contains)
-                .forEach(tokens::add));
-        return tokens;
-    }
-
-    private boolean matchesActionTokens(EntryPointInfo entryPoint, Set<String> actionTokens) {
-        if (actionTokens.isEmpty()) {
-            return true;
-        }
-        Set<String> entryPointTokens = new LinkedHashSet<>();
-        entryPointTokens.addAll(tokenize(entryPoint.getMethodName()));
-        entryPointTokens.addAll(tokenize(entryPoint.getMethodSignature()));
-        entryPointTokens.addAll(tokenize(formatRoute(entryPoint)));
-        for (String actionToken : actionTokens) {
-            if (entryPointTokens.contains(actionToken)) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private List<String> tokenize(String value) {
-        if (value == null || value.isBlank()) {
-            return List.of();
-        }
-        String normalized = value
-                .replace('#', ' ')
-                .replace('/', ' ')
-                .replace('.', ' ')
-                .replace('-', ' ')
-                .replace('_', ' ')
-                .replaceAll("([a-z0-9])([A-Z])", "$1 $2")
-                .toLowerCase(Locale.ROOT);
-        return Pattern.compile("\\s+")
-                .splitAsStream(normalized)
-                .filter(token -> !token.isBlank())
-                .filter(token -> token.length() > 1)
+                .limit(maxTypes)
                 .toList();
     }
 
@@ -608,15 +430,12 @@ public class CodeImpactAnalysisService {
     }
 
     private ChangedCodeContext resolveChangedCodeContext(List<CompareResponse.FileDiff> files) {
-        Set<String> changedTypes = new LinkedHashSet<>(extractChangedJavaTypes(files));
         Set<String> changedMethods = new LinkedHashSet<>();
-        Set<String> changedFilePaths = new LinkedHashSet<>();
 
         for (CompareResponse.FileDiff file : files) {
             if (file.getFilename() == null || !file.getFilename().endsWith(".java")) {
                 continue;
             }
-            changedFilePaths.add(file.getFilename());
             for (Integer line : extractChangedLineNumbers(file.getPatch())) {
                 try {
                     LocationResponse response = fetchCodeLocation(file.getFilename(), line);
@@ -626,9 +445,6 @@ public class CodeImpactAnalysisService {
                         if ("METHOD".equals(nodeType) && !fqn.isBlank() && !"-".equals(fqn)) {
                             changedMethods.add(fqn);
                         }
-                        if ("TYPE".equals(nodeType) && !fqn.isBlank() && !"-".equals(fqn)) {
-                            changedTypes.add(fqn);
-                        }
                     }
                 } catch (Exception ex) {
                     log.debug("按文件行解析变更节点失败 file={} line={}", file.getFilename(), line, ex);
@@ -636,7 +452,7 @@ public class CodeImpactAnalysisService {
             }
         }
 
-        return new ChangedCodeContext(new ArrayList<>(changedTypes), new ArrayList<>(changedMethods), new ArrayList<>(changedFilePaths));
+        return new ChangedCodeContext(new ArrayList<>(changedMethods));
     }
 
     private List<Integer> extractChangedLineNumbers(String patch) {
@@ -781,11 +597,10 @@ public class CodeImpactAnalysisService {
     ) {
     }
 
-    private record ChangedCodeContext(
-            List<String> typeFqns,
-            List<String> methodFqns,
-            List<String> filePaths
-    ) {
+    private record ChangedCodeContext(List<String> methodFqns) {
+    }
+
+    private record MethodTraceNode(String methodFqn, int depth) {
     }
 
     @Data
