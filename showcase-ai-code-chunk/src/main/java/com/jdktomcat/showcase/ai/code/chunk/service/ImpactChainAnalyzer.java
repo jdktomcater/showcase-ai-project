@@ -48,12 +48,15 @@ public class ImpactChainAnalyzer {
         List<EntryPoint> entryPoints = entryPointScanner.scan();
         log.info("通过模式扫描找到 {} 个入口点", entryPoints.size());
 
-        // Step 2: Save entry points to Neo4j
+        // Step 2: Replace entry points in Neo4j to avoid stale or misclassified nodes.
+        repository.clearEntryPoints();
+
+        // Step 3: Save entry points to Neo4j
         log.debug("保存入口点到 Neo4j count={}", entryPoints.size());
         repository.saveEntryPoints(entryPoints);
         log.info("入口点保存完成");
 
-        // Step 3: Build impact chains for each entry point
+        // Step 4: Build impact chains for each entry point
         List<ImpactChainNode> allNodes = new ArrayList<>();
         List<ImpactChainRelation> allRelations = new ArrayList<>();
         int successCount = 0;
@@ -83,7 +86,7 @@ public class ImpactChainAnalyzer {
         log.info("影响链去重完成 nodes={} relations={} (去重前 nodes={} relations={})", 
                 uniqueNodes.size(), uniqueRelations.size(), allNodes.size(), allRelations.size());
 
-        // Step 4: Save to Neo4j
+        // Step 5: Save to Neo4j
         log.debug("保存影响链到 Neo4j nodes={} relations={}", uniqueNodes.size(), uniqueRelations.size());
         repository.saveImpactChain(uniqueNodes, uniqueRelations);
         log.debug("链接入口点到代码节点");

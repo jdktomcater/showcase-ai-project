@@ -64,6 +64,26 @@ public class ImpactChainRepository {
     }
 
     /**
+     * Clear existing entry point nodes and reset code node entry point flags.
+     */
+    public void clearEntryPoints() {
+        try (Session session = driver.session()) {
+            session.executeWrite(tx -> {
+                tx.run("""
+                        MATCH (ep:EntryPoint)
+                        DETACH DELETE ep
+                        """);
+                tx.run("""
+                        MATCH (n:CodeNode)
+                        REMOVE n.isEntryPoint, n.entryPointType
+                        """);
+                return null;
+            });
+        }
+        log.info("Cleared existing entry points from Neo4j");
+    }
+
+    /**
      * Save impact chain nodes and relations.
      */
     public void saveImpactChain(List<ImpactChainNode> nodes, List<ImpactChainRelation> relations) {

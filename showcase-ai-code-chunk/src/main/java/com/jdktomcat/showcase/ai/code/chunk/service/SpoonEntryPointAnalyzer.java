@@ -32,6 +32,13 @@ import java.util.regex.Pattern;
 public class SpoonEntryPointAnalyzer {
 
     private static final Pattern QUOTED_STRING_PATTERN = Pattern.compile("\"([^\"]*)\"");
+    private static final Set<String> RPC_TYPE_ANNOTATIONS = Set.of(
+            "DubboService",
+            "GrpcService"
+    );
+    private static final Set<String> RPC_METHOD_ANNOTATIONS = Set.of(
+            "RpcEntry"
+    );
 
     private final Path repoRoot;
 
@@ -137,10 +144,10 @@ public class SpoonEntryPointAnalyzer {
             return EntryPointType.HTTP;
         }
 
-        if (typeAnnotations.contains("DubboService") || typeAnnotations.contains("Service")) {
+        if (typeAnnotations.stream().anyMatch(RPC_TYPE_ANNOTATIONS::contains)) {
             return EntryPointType.RPC;
         }
-        if (methodAnnotations.contains("DubboService") || methodAnnotations.contains("Service")) {
+        if (methodAnnotations.stream().anyMatch(RPC_METHOD_ANNOTATIONS::contains)) {
             return EntryPointType.RPC;
         }
 
@@ -196,7 +203,8 @@ public class SpoonEntryPointAnalyzer {
         switch (type) {
             case HTTP -> appendHttpMetadata(metadata, ownerType, method, typeAnnotations);
             case RPC -> {
-                if (methodAnnotations.contains("DubboService") || methodAnnotations.contains("Service")) {
+                if (typeAnnotations.stream().anyMatch(RPC_TYPE_ANNOTATIONS::contains)
+                        || methodAnnotations.stream().anyMatch(RPC_METHOD_ANNOTATIONS::contains)) {
                     metadata.append("protocol=DUBBO;");
                 }
             }
