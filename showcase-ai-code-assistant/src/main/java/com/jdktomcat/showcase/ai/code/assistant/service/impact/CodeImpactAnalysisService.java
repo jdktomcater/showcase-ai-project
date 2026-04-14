@@ -151,11 +151,8 @@ public class CodeImpactAnalysisService {
         }
 
         ChangedCodeContext changedContext = resolveChangedCodeContext(compareResponse.getFiles());
-        if (changedContext.methodFqns().isEmpty()) {
-            return new ImpactChainAnalysis("未识别到可回溯调用链的变更方法。", List.of());
-        }
-
-        List<EntryPointInfo> entryPoints = findRelatedEntryPoints(changedContext);
+        List<String> changedTypeFqns = extractChangedJavaTypes(compareResponse.getFiles());
+        List<EntryPointInfo> entryPoints = findRelatedEntryPoints(changedContext, changedTypeFqns);
         List<AffectedEntryPoint> affectedEntryPoints = entryPoints.stream()
                 .map(this::toAffectedEntryPoint)
                 .toList();
@@ -163,6 +160,7 @@ public class CodeImpactAnalysisService {
         StringBuilder summary = new StringBuilder("## 业务影响链路摘要\n");
         summary.append("- 仓库：").append(safe(repository)).append('\n');
         summary.append("- 变更方法数：").append(changedContext.methodFqns().size()).append('\n');
+        summary.append("- 变更类型数：").append(changedTypeFqns.size()).append('\n');
 
         if (entryPoints.isEmpty()) {
             summary.append("- 未找到与变更直接相关的业务入口点\n");
@@ -207,21 +205,172 @@ public class CodeImpactAnalysisService {
         return new ImpactChainAnalysis(summary.toString(), affectedEntryPoints);
     }
 
-    private List<EntryPointInfo> findRelatedEntryPoints(ChangedCodeContext changedContext) {
+    private List<EntryPointInfo> findRelatedEntryPoints(
+            ChangedCodeContext changedContext,
+            List<String> changedTypeFqns
+    ) {
         try {
             List<EntryPointInfo> allEntryPoints = loadAllEntryPoints();
             Map<String, EntryPointInfo> entryPointByMethod = new LinkedHashMap<>();
+            Map<String, EntryPointInfo> entryPointByMethodNoArgs = new LinkedHashMap<>();
+            Map<String, List<EntryPointInfo>> entryPointsByClass = new LinkedHashMap<>();
             for (EntryPointInfo entryPoint : allEntryPoints) {
                 if (entryPoint.getMethodSignature() != null && !entryPoint.getMethodSignature().isBlank()) {
                     entryPointByMethod.put(entryPoint.getMethodSignature(), entryPoint);
+                    entryPointByMethodNoArgs.put(stripMethodArgs(entryPoint.getMethodSignature()), entryPoint);
+                }
+                if (entryPoint.getClassName() != null && !entryPoint.getClassName().isBlank()) {
+                    entryPointsByClass.computeIfAbsent(entryPoint.getClassName(), key -> new ArrayList<>())
+                            .add(entryPoint);
                 }
             }
 
-            return traceEntryPointsByCallGraph(changedContext.methodFqns(), entryPointByMethod);
+            List<EntryPointInfo> tracedByCallGraph = traceEntryPointsByCallGraph(
+                    changedContext.methodFqns(),
+                    entryPointByMethod
+            );
+            if (!tracedByCallGraph.isEmpty()) {
+                return tracedByCallGraph;
+            }
+
+            List<EntryPointInfo> tracedByTypeImpact = traceEntryPointsByTypeImpact(
+                    changedTypeFqns,
+                    entryPointByMethod,
+                    entryPointByMethodNoArgs,
+                    entryPointsByClass
+            );
+            if (!tracedByTypeImpact.isEmpty()) {
+                log.debug("通过类型影响面兜底匹配到入口点 count={}", tracedByTypeImpact.size());
+                return prioritizeStrictEntryPoints(tracedByTypeImpact);
+            }
+
+            List<EntryPointInfo> directTypeMatches = traceEntryPointsByDirectTypeMatch(changedTypeFqns, entryPointsByClass);
+            if (!directTypeMatches.isEmpty()) {
+                log.debug("通过类型直连兜底匹配到入口点 count={}", directTypeMatches.size());
+                return prioritizeStrictEntryPoints(directTypeMatches);
+            }
+
+            if (changedContext.methodFqns().isEmpty()) {
+                log.debug("未解析到变更方法，且兜底入口点匹配为空");
+            }
+            return List.of();
         } catch (Exception e) {
             log.warn("获取入口点列表失败", e);
             return List.of();
         }
+    }
+
+    private List<EntryPointInfo> traceEntryPointsByTypeImpact(
+            List<String> changedTypeFqns,
+            Map<String, EntryPointInfo> entryPointByMethod,
+            Map<String, EntryPointInfo> entryPointByMethodNoArgs,
+            Map<String, List<EntryPointInfo>> entryPointsByClass
+    ) {
+        if (changedTypeFqns == null || changedTypeFqns.isEmpty()) {
+            return List.of();
+        }
+
+        Set<EntryPointInfo> matched = new LinkedHashSet<>();
+        for (String changedTypeFqn : changedTypeFqns) {
+            if (changedTypeFqn == null || changedTypeFqn.isBlank()) {
+                continue;
+            }
+            try {
+                ImpactResponse impactResponse = fetchTypeImpact(changedTypeFqn);
+                for (Map<String, Object> impact : impactResponse.getImpacts()) {
+                    String impactedFqn = safe(impact.get("fqn"));
+                    if (impactedFqn.isBlank() || "-".equals(impactedFqn)) {
+                        continue;
+                    }
+                    collectMatchedEntryPoints(
+                            impactedFqn,
+                            entryPointByMethod,
+                            entryPointByMethodNoArgs,
+                            entryPointsByClass,
+                            matched
+                    );
+                    if (matched.size() >= maxTypes) {
+                        return new ArrayList<>(matched);
+                    }
+                }
+            } catch (Exception ex) {
+                log.debug("按类型影响面回溯入口点失败 type={}", changedTypeFqn, ex);
+            }
+        }
+        return new ArrayList<>(matched);
+    }
+
+    private List<EntryPointInfo> traceEntryPointsByDirectTypeMatch(
+            List<String> changedTypeFqns,
+            Map<String, List<EntryPointInfo>> entryPointsByClass
+    ) {
+        if (changedTypeFqns == null || changedTypeFqns.isEmpty()) {
+            return List.of();
+        }
+        Set<EntryPointInfo> matched = new LinkedHashSet<>();
+        for (String changedTypeFqn : changedTypeFqns) {
+            if (changedTypeFqn == null || changedTypeFqn.isBlank()) {
+                continue;
+            }
+            List<EntryPointInfo> entryPoints = entryPointsByClass.get(changedTypeFqn);
+            if (entryPoints == null || entryPoints.isEmpty()) {
+                continue;
+            }
+            matched.addAll(entryPoints);
+            if (matched.size() >= maxTypes) {
+                break;
+            }
+        }
+        return new ArrayList<>(matched);
+    }
+
+    private void collectMatchedEntryPoints(
+            String impactedFqn,
+            Map<String, EntryPointInfo> entryPointByMethod,
+            Map<String, EntryPointInfo> entryPointByMethodNoArgs,
+            Map<String, List<EntryPointInfo>> entryPointsByClass,
+            Set<EntryPointInfo> matched
+    ) {
+        EntryPointInfo exactMethodMatch = entryPointByMethod.get(impactedFqn);
+        if (exactMethodMatch != null) {
+            matched.add(exactMethodMatch);
+        }
+
+        EntryPointInfo normalizedMethodMatch = entryPointByMethodNoArgs.get(stripMethodArgs(impactedFqn));
+        if (normalizedMethodMatch != null) {
+            matched.add(normalizedMethodMatch);
+        }
+
+        String impactedClassName = extractClassName(impactedFqn);
+        if (impactedClassName.isBlank()) {
+            return;
+        }
+        List<EntryPointInfo> classMatches = entryPointsByClass.get(impactedClassName);
+        if (classMatches != null && !classMatches.isEmpty()) {
+            matched.addAll(classMatches);
+        }
+    }
+
+    private String stripMethodArgs(String methodFqn) {
+        if (methodFqn == null || methodFqn.isBlank()) {
+            return "";
+        }
+        int leftBracket = methodFqn.indexOf('(');
+        if (leftBracket < 0) {
+            return methodFqn;
+        }
+        return methodFqn.substring(0, leftBracket);
+    }
+
+    private String extractClassName(String fqn) {
+        if (fqn == null || fqn.isBlank()) {
+            return "";
+        }
+        int split = fqn.indexOf('#');
+        if (split > 0) {
+            return fqn.substring(0, split);
+        }
+        return fqn;
     }
 
     private List<EntryPointInfo> traceEntryPointsByCallGraph(
