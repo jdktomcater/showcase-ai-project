@@ -23,6 +23,8 @@ telegram:
     chat-id: ${TELEGRAM_CHAT_ID:-5036565176}
 
 spring:
+  main:
+    web-application-type: servlet
   jackson:
     serialization:
       write-dates-as-timestamps: false
