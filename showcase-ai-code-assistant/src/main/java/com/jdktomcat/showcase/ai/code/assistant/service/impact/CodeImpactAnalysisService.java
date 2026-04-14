@@ -31,6 +31,11 @@ import java.util.regex.Pattern;
 public class CodeImpactAnalysisService {
 
     private static final Pattern DIFF_HUNK_PATTERN = Pattern.compile("@@ -\\d+(?:,\\d+)? \\+(\\d+)(?:,(\\d+))? @@");
+    private static final Set<String> ACTION_TOKENS = Set.of(
+            "create", "cancel", "update", "delete", "remove", "refund", "pay",
+            "submit", "confirm", "close", "open", "list", "query", "detail",
+            "health", "sync", "retry"
+    );
 
     private final RestTemplate restTemplate;
 
@@ -267,7 +272,7 @@ public class CodeImpactAnalysisService {
                 matched.addAll(matchEntryPointsByImpactChain(allEntryPoints, changedContext, matched));
             }
 
-            List<EntryPointInfo> prioritized = prioritizeEntryPoints(new ArrayList<>(matched));
+            List<EntryPointInfo> prioritized = prioritizeEntryPoints(new ArrayList<>(matched), changedContext);
             if (!prioritized.isEmpty()) {
                 return prioritized;
             }
@@ -329,10 +334,12 @@ public class CodeImpactAnalysisService {
         return false;
     }
 
-    private List<EntryPointInfo> prioritizeEntryPoints(List<EntryPointInfo> entryPoints) {
+    private List<EntryPointInfo> prioritizeEntryPoints(List<EntryPointInfo> entryPoints, ChangedCodeContext changedContext) {
         if (entryPoints.isEmpty()) {
             return List.of();
         }
+
+        Set<String> changedActionTokens = extractChangedActionTokens(changedContext);
 
         entryPoints.sort((left, right) -> {
             int typeCompare = Integer.compare(entryPointPriority(left), entryPointPriority(right));
@@ -347,10 +354,18 @@ public class CodeImpactAnalysisService {
         });
 
         boolean hasHttp = entryPoints.stream().anyMatch(entryPoint -> "HTTP".equalsIgnoreCase(entryPoint.getType()));
-        return entryPoints.stream()
+        List<EntryPointInfo> prioritized = entryPoints.stream()
                 .filter(entryPoint -> !hasHttp || "HTTP".equalsIgnoreCase(entryPoint.getType()))
-                .limit(maxTypes)
                 .toList();
+        if (!changedActionTokens.isEmpty()) {
+            List<EntryPointInfo> actionMatched = prioritized.stream()
+                    .filter(entryPoint -> matchesActionTokens(entryPoint, changedActionTokens))
+                    .toList();
+            if (!actionMatched.isEmpty()) {
+                return actionMatched.stream().limit(maxTypes).toList();
+            }
+        }
+        return prioritized.stream().limit(maxTypes).toList();
     }
 
     private List<EntryPointInfo> heuristicEntryPointMatch(
@@ -358,19 +373,30 @@ public class CodeImpactAnalysisService {
             ChangedCodeContext changedContext
     ) {
         Set<String> changedTokens = buildChangedContextTokens(changedContext);
+        Set<String> changedActionTokens = extractChangedActionTokens(changedContext);
         if (changedTokens.isEmpty()) {
             return List.of();
         }
 
-        return allEntryPoints.stream()
+        List<Map.Entry<EntryPointInfo, Integer>> scored = allEntryPoints.stream()
+                .filter(entryPoint -> "HTTP".equalsIgnoreCase(entryPoint.getType()))
+                .filter(entryPoint -> changedActionTokens.isEmpty() || matchesActionTokens(entryPoint, changedActionTokens))
                 .map(entryPoint -> Map.entry(entryPoint, scoreEntryPoint(entryPoint, changedTokens)))
                 .filter(entry -> entry.getValue() > 0)
                 .sorted(Map.Entry.<EntryPointInfo, Integer>comparingByValue(Comparator.reverseOrder())
                         .thenComparing(entry -> entryPointPriority(entry.getKey()))
                         .thenComparing(entry -> entry.getKey().getId()))
+                .toList();
+
+        if (scored.isEmpty()) {
+            return List.of();
+        }
+
+        int bestScore = scored.get(0).getValue();
+        return scored.stream()
+                .filter(entry -> entry.getValue() == bestScore)
                 .map(Map.Entry::getKey)
-                .filter(entryPoint -> "HTTP".equalsIgnoreCase(entryPoint.getType()))
-                .limit(maxTypes)
+                .limit(1)
                 .toList();
     }
 
@@ -403,6 +429,33 @@ public class CodeImpactAnalysisService {
             score += 2;
         }
         return score;
+    }
+
+    private Set<String> extractChangedActionTokens(ChangedCodeContext changedContext) {
+        Set<String> tokens = new LinkedHashSet<>();
+        changedContext.methodFqns().forEach(value -> tokenize(value).stream()
+                .filter(ACTION_TOKENS::contains)
+                .forEach(tokens::add));
+        changedContext.typeFqns().forEach(value -> tokenize(value).stream()
+                .filter(ACTION_TOKENS::contains)
+                .forEach(tokens::add));
+        return tokens;
+    }
+
+    private boolean matchesActionTokens(EntryPointInfo entryPoint, Set<String> actionTokens) {
+        if (actionTokens.isEmpty()) {
+            return true;
+        }
+        Set<String> entryPointTokens = new LinkedHashSet<>();
+        entryPointTokens.addAll(tokenize(entryPoint.getMethodName()));
+        entryPointTokens.addAll(tokenize(entryPoint.getMethodSignature()));
+        entryPointTokens.addAll(tokenize(formatRoute(entryPoint)));
+        for (String actionToken : actionTokens) {
+            if (entryPointTokens.contains(actionToken)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private List<String> tokenize(String value) {
