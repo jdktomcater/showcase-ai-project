@@ -486,7 +486,7 @@ public class CodeImpactAnalysisService {
                 continue;
             }
             changedFilePaths.add(file.getFilename());
-            for (Integer line : extractChangedLineAnchors(file.getPatch())) {
+            for (Integer line : extractChangedLineNumbers(file.getPatch())) {
                 try {
                     LocationResponse response = fetchCodeLocation(file.getFilename(), line);
                     for (Map<String, Object> node : response.getNodes()) {
@@ -508,22 +508,44 @@ public class CodeImpactAnalysisService {
         return new ChangedCodeContext(new ArrayList<>(changedTypes), new ArrayList<>(changedMethods), new ArrayList<>(changedFilePaths));
     }
 
-    private List<Integer> extractChangedLineAnchors(String patch) {
+    private List<Integer> extractChangedLineNumbers(String patch) {
         if (patch == null || patch.isBlank()) {
             return List.of();
         }
-        Set<Integer> anchors = new LinkedHashSet<>();
-        Matcher matcher = DIFF_HUNK_PATTERN.matcher(patch);
-        while (matcher.find()) {
-            int newStart = Integer.parseInt(matcher.group(1));
-            int newCount = matcher.group(2) == null ? 1 : Integer.parseInt(matcher.group(2));
-            if (newCount == 0) {
-                anchors.add(Math.max(1, newStart));
-            } else {
-                anchors.add(newStart);
+
+        Set<Integer> changedLines = new LinkedHashSet<>();
+        String[] lines = patch.split("\\R");
+        int currentNewLine = -1;
+        for (String line : lines) {
+            Matcher matcher = DIFF_HUNK_PATTERN.matcher(line);
+            if (matcher.find()) {
+                currentNewLine = Integer.parseInt(matcher.group(1));
+                int newCount = matcher.group(2) == null ? 1 : Integer.parseInt(matcher.group(2));
+                if (newCount == 0) {
+                    changedLines.add(Math.max(1, currentNewLine));
+                }
+                continue;
             }
+
+            if (currentNewLine < 0) {
+                continue;
+            }
+
+            if (line.startsWith("+++")) {
+                continue;
+            }
+            if (line.startsWith("+")) {
+                changedLines.add(Math.max(1, currentNewLine));
+                currentNewLine++;
+                continue;
+            }
+            if (line.startsWith("-")) {
+                continue;
+            }
+            currentNewLine++;
         }
-        return new ArrayList<>(anchors);
+
+        return new ArrayList<>(changedLines);
     }
 
     private List<String> extractChangedJavaTypes(List<CompareResponse.FileDiff> files) {
