@@ -133,14 +133,24 @@ public class CommitResultAgent implements NodeAction<CommitTaskState> {
     }
 
     private String appendAffectedEntryPointsSection(String finalReport, List<AffectedEntryPoint> affectedEntryPoints) {
-        if (affectedEntryPoints == null || affectedEntryPoints.isEmpty() || finalReport.contains("## 影响入口点")) {
+        if (affectedEntryPoints == null || affectedEntryPoints.isEmpty()) {
             return finalReport;
+        }
+        if (finalReport.contains("## 影响入口点") && containsAnyEntryPointReference(finalReport, affectedEntryPoints)) {
+            return finalReport;
+        }
+        if (finalReport.contains("## 影响入口点")) {
+            return finalReport.stripTrailing() + "\n\n## 影响入口点（系统补充）\n" + formatAffectedEntryPoints(affectedEntryPoints);
         }
         return finalReport.stripTrailing() + "\n\n## 影响入口点\n" + formatAffectedEntryPoints(affectedEntryPoints);
     }
 
     private String appendAffectedEntryPointsSummary(String telegramMessage, List<AffectedEntryPoint> affectedEntryPoints) {
-        if (affectedEntryPoints == null || affectedEntryPoints.isEmpty() || telegramMessage.contains("影响入口点")) {
+        if (affectedEntryPoints == null || affectedEntryPoints.isEmpty()) {
+            return telegramMessage;
+        }
+        if (telegramMessage.contains("影响入口点")
+                && containsAnyEntryPointReference(telegramMessage, affectedEntryPoints)) {
             return telegramMessage;
         }
         return telegramMessage.stripTrailing() + "\n影响入口点: " + affectedEntryPoints.stream()
@@ -190,6 +200,27 @@ public class CommitResultAgent implements NodeAction<CommitTaskState> {
             return entryPoint.getType() + " `" + entryPoint.getRoute() + "`";
         }
         return entryPoint.getType() + " " + entryPoint.getMethodSignature();
+    }
+
+    private boolean containsAnyEntryPointReference(String text, List<AffectedEntryPoint> affectedEntryPoints) {
+        if (text == null || text.isBlank() || affectedEntryPoints == null || affectedEntryPoints.isEmpty()) {
+            return false;
+        }
+        for (AffectedEntryPoint entryPoint : affectedEntryPoints) {
+            if (entryPoint.getRoute() != null && !entryPoint.getRoute().isBlank() && text.contains(entryPoint.getRoute())) {
+                return true;
+            }
+            if (entryPoint.getMethodSignature() != null && !entryPoint.getMethodSignature().isBlank()
+                    && text.contains(entryPoint.getMethodSignature())) {
+                return true;
+            }
+            if (entryPoint.getClassName() != null && entryPoint.getMethodName() != null
+                    && !entryPoint.getClassName().isBlank() && !entryPoint.getMethodName().isBlank()
+                    && text.contains(entryPoint.getClassName() + "#" + entryPoint.getMethodName())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private String extractJson(String modelOutput) {

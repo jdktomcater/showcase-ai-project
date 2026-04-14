@@ -152,7 +152,11 @@ public class CodeImpactAnalysisService {
 
         ChangedCodeContext changedContext = resolveChangedCodeContext(compareResponse.getFiles());
         List<String> changedTypeFqns = extractChangedJavaTypes(compareResponse.getFiles());
-        List<EntryPointInfo> entryPoints = findRelatedEntryPoints(changedContext, changedTypeFqns);
+        List<String> changedFilePaths = compareResponse.getFiles().stream()
+                .map(CompareResponse.FileDiff::getFilename)
+                .filter(Objects::nonNull)
+                .toList();
+        List<EntryPointInfo> entryPoints = findRelatedEntryPoints(changedContext, changedTypeFqns, changedFilePaths);
         List<AffectedEntryPoint> affectedEntryPoints = entryPoints.stream()
                 .map(this::toAffectedEntryPoint)
                 .toList();
@@ -207,10 +211,17 @@ public class CodeImpactAnalysisService {
 
     private List<EntryPointInfo> findRelatedEntryPoints(
             ChangedCodeContext changedContext,
-            List<String> changedTypeFqns
+            List<String> changedTypeFqns,
+            List<String> changedFilePaths
     ) {
         try {
             List<EntryPointInfo> allEntryPoints = loadAllEntryPoints();
+            if (allEntryPoints.isEmpty()) {
+                log.warn("入口点列表为空，尝试触发 impact analyze 重建");
+                triggerImpactAnalyze();
+                allEntryPoints = loadAllEntryPoints();
+                log.info("impact analyze 后入口点数量={}", allEntryPoints.size());
+            }
             Map<String, EntryPointInfo> entryPointByMethod = new LinkedHashMap<>();
             Map<String, EntryPointInfo> entryPointByMethodNoArgs = new LinkedHashMap<>();
             Map<String, List<EntryPointInfo>> entryPointsByClass = new LinkedHashMap<>();
@@ -250,6 +261,16 @@ public class CodeImpactAnalysisService {
                 return prioritizeStrictEntryPoints(directTypeMatches);
             }
 
+            List<EntryPointInfo> moduleAndKeywordMatches = traceEntryPointsByModuleAndKeywords(
+                    allEntryPoints,
+                    changedTypeFqns,
+                    changedFilePaths
+            );
+            if (!moduleAndKeywordMatches.isEmpty()) {
+                log.debug("通过模块/关键词兜底匹配到入口点 count={}", moduleAndKeywordMatches.size());
+                return prioritizeStrictEntryPoints(moduleAndKeywordMatches);
+            }
+
             if (changedContext.methodFqns().isEmpty()) {
                 log.debug("未解析到变更方法，且兜底入口点匹配为空");
             }
@@ -257,6 +278,15 @@ public class CodeImpactAnalysisService {
         } catch (Exception e) {
             log.warn("获取入口点列表失败", e);
             return List.of();
+        }
+    }
+
+    private void triggerImpactAnalyze() {
+        try {
+            AnalysisResponse response = postForObject("/api/impact/analyze", Map.of(), AnalysisResponse.class);
+            log.info("触发 impact analyze 完成 success={} message={}", response.isSuccess(), response.getMessage());
+        } catch (Exception ex) {
+            log.warn("触发 impact analyze 失败", ex);
         }
     }
 
@@ -322,6 +352,140 @@ public class CodeImpactAnalysisService {
             }
         }
         return new ArrayList<>(matched);
+    }
+
+    private List<EntryPointInfo> traceEntryPointsByModuleAndKeywords(
+            List<EntryPointInfo> allEntryPoints,
+            List<String> changedTypeFqns,
+            List<String> changedFilePaths
+    ) {
+        if (allEntryPoints == null || allEntryPoints.isEmpty()) {
+            return List.of();
+        }
+
+        Set<String> changedModules = extractChangedModules(changedFilePaths);
+        List<String> tokens = extractMatchingTokens(changedTypeFqns, changedFilePaths);
+        Set<EntryPointInfo> matched = new LinkedHashSet<>();
+
+        for (EntryPointInfo entryPoint : allEntryPoints) {
+            boolean sameModule = !changedModules.isEmpty()
+                    && changedModules.contains(normalize(entryPoint.getModule()));
+            int keywordScore = calculateKeywordScore(entryPoint, tokens);
+            if (sameModule && keywordScore > 0) {
+                matched.add(entryPoint);
+            }
+        }
+        if (!matched.isEmpty()) {
+            return new ArrayList<>(matched);
+        }
+
+        for (EntryPointInfo entryPoint : allEntryPoints) {
+            boolean sameModule = !changedModules.isEmpty()
+                    && changedModules.contains(normalize(entryPoint.getModule()));
+            if (sameModule && hasRoute(entryPoint)) {
+                matched.add(entryPoint);
+                if (matched.size() >= maxTypes) {
+                    break;
+                }
+            }
+        }
+        if (!matched.isEmpty()) {
+            return new ArrayList<>(matched);
+        }
+
+        for (EntryPointInfo entryPoint : allEntryPoints) {
+            int keywordScore = calculateKeywordScore(entryPoint, tokens);
+            if (keywordScore > 1 && hasRoute(entryPoint)) {
+                matched.add(entryPoint);
+                if (matched.size() >= maxTypes) {
+                    break;
+                }
+            }
+        }
+        return new ArrayList<>(matched);
+    }
+
+    private Set<String> extractChangedModules(List<String> changedFilePaths) {
+        if (changedFilePaths == null || changedFilePaths.isEmpty()) {
+            return Set.of();
+        }
+        Set<String> modules = new LinkedHashSet<>();
+        for (String filePath : changedFilePaths) {
+            if (filePath == null || filePath.isBlank()) {
+                continue;
+            }
+            String normalizedPath = filePath.replace('\\', '/');
+            int split = normalizedPath.indexOf('/');
+            if (split <= 0) {
+                continue;
+            }
+            modules.add(normalize(normalizedPath.substring(0, split)));
+        }
+        return modules;
+    }
+
+    private List<String> extractMatchingTokens(List<String> changedTypeFqns, List<String> changedFilePaths) {
+        Set<String> tokens = new LinkedHashSet<>();
+        if (changedTypeFqns != null) {
+            for (String changedTypeFqn : changedTypeFqns) {
+                tokens.addAll(tokenize(changedTypeFqn));
+            }
+        }
+        if (changedFilePaths != null) {
+            for (String changedFilePath : changedFilePaths) {
+                tokens.addAll(tokenize(changedFilePath));
+            }
+        }
+        return new ArrayList<>(tokens);
+    }
+
+    private int calculateKeywordScore(EntryPointInfo entryPoint, List<String> tokens) {
+        if (tokens == null || tokens.isEmpty()) {
+            return 0;
+        }
+        String searchable = normalize(String.join(" ",
+                safe(entryPoint.getId()),
+                safe(entryPoint.getClassName()),
+                safe(entryPoint.getMethodName()),
+                safe(entryPoint.getMethodSignature()),
+                safe(entryPoint.getFilePath()),
+                safe(entryPoint.getModule()),
+                safe(entryPoint.getMetadata())));
+
+        int score = 0;
+        for (String token : tokens) {
+            if (token.length() < 3) {
+                continue;
+            }
+            if (searchable.contains(token)) {
+                score++;
+            }
+        }
+        return score;
+    }
+
+    private List<String> tokenize(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return List.of();
+        }
+        String normalized = raw
+                .replaceAll("([a-z])([A-Z])", "$1 $2")
+                .toLowerCase();
+        String[] segments = normalized.split("[^a-z0-9]+");
+        List<String> tokens = new ArrayList<>();
+        for (String segment : segments) {
+            if (segment.length() >= 3) {
+                tokens.add(segment);
+            }
+        }
+        return tokens;
+    }
+
+    private String normalize(String value) {
+        if (value == null) {
+            return "";
+        }
+        return value.toLowerCase();
     }
 
     private void collectMatchedEntryPoints(
@@ -478,6 +642,8 @@ public class CodeImpactAnalysisService {
         info.setClassName(safe(entryPoint.get("className")));
         info.setMethodName(safe(entryPoint.get("methodName")));
         info.setMethodSignature(safe(entryPoint.get("methodSignature")));
+        info.setFilePath(safe(entryPoint.get("filePath")));
+        info.setModule(safe(entryPoint.get("module")));
         info.setMetadata(safe(entryPoint.get("metadata")));
         return info;
     }
@@ -798,12 +964,20 @@ public class CodeImpactAnalysisService {
     }
 
     @Data
+    public static class AnalysisResponse {
+        private boolean success;
+        private String message;
+    }
+
+    @Data
     public static class EntryPointInfo {
         private String id;
         private String type;
         private String className;
         private String methodName;
         private String methodSignature;
+        private String filePath;
+        private String module;
         private String metadata;
     }
 
