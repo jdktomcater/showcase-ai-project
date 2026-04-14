@@ -4,7 +4,7 @@ server:
 app:
   code-rag:
     repo-name: showcase-pay
-    repo-root: /Users/yuhata/workspace/github/jdktomcater/showcase-pay
+    repo-root: /Users/yuhata/workspace/ai/coder-assistant/showcase-pay
     include-globs:
       - "**/*.java"
       - "**/*.xml"
@@ -13,7 +13,7 @@ app:
       - "**/*.md"
       - "**/*.sql"
   impact-analysis:
-    repo-root: /Users/yuhata/workspace/github/jdktomcater/showcase-pay
+    repo-root: /Users/yuhata/workspace/ai/coder-assistant/showcase-pay
 
 spring:
   datasource:

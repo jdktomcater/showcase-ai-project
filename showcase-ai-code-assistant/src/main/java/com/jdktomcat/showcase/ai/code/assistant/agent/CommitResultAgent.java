@@ -1,12 +1,14 @@
 package com.jdktomcat.showcase.ai.code.assistant.agent;
 
 import com.jdktomcat.showcase.ai.code.assistant.domain.dto.CommitTaskState;
+import com.jdktomcat.showcase.ai.code.assistant.dto.AffectedEntryPoint;
 import com.jdktomcat.showcase.ai.code.assistant.utils.JSONUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.bsc.langgraph4j.action.NodeAction;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.stereotype.Component;
 
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
@@ -48,6 +50,8 @@ public class CommitResultAgent implements NodeAction<CommitTaskState> {
                 - 新增行数：%s
                 - 删除行数：%s
                 - Compare URL：%s
+                - 影响入口点：
+                %s
                 
                 依赖图影响面摘要：
                 %s
@@ -73,6 +77,7 @@ public class CommitResultAgent implements NodeAction<CommitTaskState> {
                 Objects.toString(state.getAdditions(), "0"),
                 Objects.toString(state.getDeletions(), "0"),
                 state.getCompareUrl(),
+                formatAffectedEntryPoints(state.getAffectedEntryPoints()),
                 state.getCodeImpactSummary(),
                 state.getBusinessReport(),
                 state.getConventionReport(),
@@ -90,14 +95,61 @@ public class CommitResultAgent implements NodeAction<CommitTaskState> {
         }
         String decision = Objects.toString(result.getOrDefault("decision", "FAIL")).trim().toUpperCase();
         String summary = Objects.toString(result.getOrDefault("summary", "模型未返回有效总结"));
-        String finalReport = Objects.toString(result.getOrDefault("finalReport", summary));
-        String telegramMessage = Objects.toString(result.getOrDefault("telegramMessage", finalReport));
+        String finalReport = appendAffectedEntryPointsSection(
+                Objects.toString(result.getOrDefault("finalReport", summary)),
+                state.getAffectedEntryPoints()
+        );
+        String telegramMessage = appendAffectedEntryPointsSummary(
+                Objects.toString(result.getOrDefault("telegramMessage", finalReport)),
+                state.getAffectedEntryPoints()
+        );
         boolean passed = "PASS".equals(decision);
         state.setDecision(decision);
         state.setPassed(passed);
         state.setFinalReport(finalReport);
         state.setTelegramMessage(telegramMessage);
         state.setNeedRetry(false);
+    }
+
+    private String appendAffectedEntryPointsSection(String finalReport, List<AffectedEntryPoint> affectedEntryPoints) {
+        if (affectedEntryPoints == null || affectedEntryPoints.isEmpty() || finalReport.contains("## 影响入口点")) {
+            return finalReport;
+        }
+        return finalReport.stripTrailing() + "\n\n## 影响入口点\n" + formatAffectedEntryPoints(affectedEntryPoints);
+    }
+
+    private String appendAffectedEntryPointsSummary(String telegramMessage, List<AffectedEntryPoint> affectedEntryPoints) {
+        if (affectedEntryPoints == null || affectedEntryPoints.isEmpty() || telegramMessage.contains("影响入口点")) {
+            return telegramMessage;
+        }
+        return telegramMessage.stripTrailing() + "\n影响入口点: " + affectedEntryPoints.stream()
+                .limit(3)
+                .map(this::shortEntryPointLabel)
+                .reduce((left, right) -> left + ", " + right)
+                .orElse("-");
+    }
+
+    private String formatAffectedEntryPoints(List<AffectedEntryPoint> affectedEntryPoints) {
+        if (affectedEntryPoints == null || affectedEntryPoints.isEmpty()) {
+            return "- 未识别到直接相关的入口点";
+        }
+        StringBuilder builder = new StringBuilder();
+        for (AffectedEntryPoint entryPoint : affectedEntryPoints) {
+            builder.append("- ").append(shortEntryPointLabel(entryPoint))
+                    .append(" -> ")
+                    .append(entryPoint.getClassName())
+                    .append('#')
+                    .append(entryPoint.getMethodName())
+                    .append('\n');
+        }
+        return builder.toString().trim();
+    }
+
+    private String shortEntryPointLabel(AffectedEntryPoint entryPoint) {
+        if (entryPoint.getRoute() != null && !entryPoint.getRoute().isBlank()) {
+            return entryPoint.getType() + " `" + entryPoint.getRoute() + "`";
+        }
+        return entryPoint.getType() + " " + entryPoint.getMethodSignature();
     }
 
     private String extractJson(String modelOutput) {

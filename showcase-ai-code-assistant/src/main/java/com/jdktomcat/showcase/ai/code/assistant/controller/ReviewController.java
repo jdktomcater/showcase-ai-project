@@ -35,6 +35,7 @@ public class ReviewController {
                 .finalReport(finalState.getFinalReport())
                 .telegramMessage(finalState.getTelegramMessage())
                 .codeImpactSummary(finalState.getCodeImpactSummary())
+                .affectedEntryPoints(finalState.getAffectedEntryPoints())
                 .businessReport(finalState.getBusinessReport())
                 .conventionReport(finalState.getConventionReport())
                 .performanceReport(finalState.getPerformanceReport())

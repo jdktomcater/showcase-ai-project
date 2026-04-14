@@ -1,12 +1,14 @@
 package com.jdktomcat.showcase.ai.code.assistant.agent;
 
 import com.jdktomcat.showcase.ai.code.assistant.domain.dto.CommitTaskState;
+import com.jdktomcat.showcase.ai.code.assistant.dto.AffectedEntryPoint;
 import com.jdktomcat.showcase.ai.code.assistant.service.impact.CodeImpactAnalysisService;
 import lombok.extern.slf4j.Slf4j;
 import org.bsc.langgraph4j.action.NodeAction;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.stereotype.Component;
 
+import java.util.List;
 import java.util.Map;
 
 @Slf4j
@@ -23,12 +25,14 @@ public class BusinessAgent implements NodeAction<CommitTaskState> {
 
     /** 根据 diff 和依赖图进行业务风险审查 */
     public void review(CommitTaskState state) {
-        // 构建完整的影响面评估报告（结合依赖图和影响链路）
-        String impactSummary = impactAnalysisService.buildFullImpactSummary(
-                state.getRepository(), 
-                state.getCompareResponse()
-        );
-        state.setCodeImpactSummary(impactSummary);
+        if (state.getCodeImpactSummary() == null || state.getCodeImpactSummary().isBlank()) {
+            CodeImpactAnalysisService.ImpactAnalysisResult impactAnalysis = impactAnalysisService.analyzeImpact(
+                    state.getRepository(),
+                    state.getCompareResponse()
+            );
+            state.setCodeImpactSummary(impactAnalysis.summary());
+            state.setAffectedEntryPoints(impactAnalysis.affectedEntryPoints());
+        }
         
         String prompt = String.format("""
         你是业务风险审查专家，请基于提交信息和代码 diff 识别业务逻辑层面的变更风险。
@@ -53,16 +57,45 @@ public class BusinessAgent implements NodeAction<CommitTaskState> {
         - 分支：%s
         - 提交说明：%s
 
+        关联入口点：
+        %s
+
         依赖图影响面摘要：
         %s
 
         Diff:
         %s
-        """, state.getRepository(), state.getBranch(), state.getMessage(), state.getCodeImpactSummary(), state.getDiff());
+        """,
+                state.getRepository(),
+                state.getBranch(),
+                state.getMessage(),
+                formatAffectedEntryPoints(state.getAffectedEntryPoints()),
+                state.getCodeImpactSummary(),
+                state.getDiff());
         String review = chatModel.call(prompt);
 //        log.info("业务完整审查完成，报告长度 {} 字", review.length());
         log.info("业务完整审查完成，报告： {} ", review);
         state.setBusinessReport(review);
+    }
+
+    private String formatAffectedEntryPoints(List<AffectedEntryPoint> affectedEntryPoints) {
+        if (affectedEntryPoints == null || affectedEntryPoints.isEmpty()) {
+            return "- 未识别到直接相关的入口点";
+        }
+        StringBuilder builder = new StringBuilder();
+        for (AffectedEntryPoint entryPoint : affectedEntryPoints) {
+            builder.append("- ")
+                    .append(entryPoint.getType());
+            if (entryPoint.getRoute() != null && !entryPoint.getRoute().isBlank()) {
+                builder.append(" `").append(entryPoint.getRoute()).append('`');
+            }
+            builder.append(" -> ")
+                    .append(entryPoint.getClassName())
+                    .append('#')
+                    .append(entryPoint.getMethodName())
+                    .append('\n');
+        }
+        return builder.toString().trim();
     }
 
     @Override

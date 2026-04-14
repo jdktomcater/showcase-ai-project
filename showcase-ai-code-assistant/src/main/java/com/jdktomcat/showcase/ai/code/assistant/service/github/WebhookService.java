@@ -8,10 +8,10 @@ import com.jdktomcat.showcase.ai.code.assistant.service.telegram.TelegramNotific
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.*;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
-import org.springframework.web.client.RestTemplate;
 
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
@@ -24,7 +24,7 @@ import java.util.Formatter;
 public class WebhookService {
 
     private final ObjectMapper objectMapper;
-    private final RestTemplate restTemplate;
+    private final GitHubCompareClient gitHubCompareClient;
     private final CommitReviewService commitReviewService;
     private final TelegramNotificationService telegramNotificationService;
 
@@ -58,7 +58,7 @@ public class WebhookService {
                     fullName, pushPayload.getRef(), before, after);
             
             log.debug("开始获取 Compare 数据 repository={} before={} after={}", fullName, before, after);
-            CompareResponse compareResponse = fetchCompare(fullName, before, after);
+            CompareResponse compareResponse = gitHubCompareClient.fetchCompare(fullName, before, after);
             log.info("Compare 数据获取完成 repository={} files={}", 
                     fullName, compareResponse != null && compareResponse.getFiles() != null ? compareResponse.getFiles().size() : 0);
             
@@ -73,32 +73,6 @@ public class WebhookService {
                     fullName, pushPayload.getRef(), finalState.getDecision());
         } catch (Exception e) {
             log.error("GitHub push 处理失败", e);
-        }
-    }
-
-    public CompareResponse fetchCompare(String fullName, String before, String after) {
-        String url = "https://api.github.com/repos/" + fullName + "/compare/" + before + "..." + after;
-        log.debug("调用 GitHub Compare API url={}", url);
-
-        HttpHeaders headers = new HttpHeaders();
-        headers.setBearerAuth(githubToken);
-        headers.setAccept(java.util.List.of(MediaType.APPLICATION_JSON));
-        headers.add("X-GitHub-Api-Version", "2022-11-28");
-
-        HttpEntity<Void> entity = new HttpEntity<>(headers);
-
-        try {
-            ResponseEntity<CompareResponse> response = restTemplate.exchange(
-                    url,
-                    HttpMethod.GET,
-                    entity,
-                    CompareResponse.class
-            );
-            log.debug("GitHub Compare API 响应状态={} repository={}", response.getStatusCode(), fullName);
-            return response.getBody();
-        } catch (Exception e) {
-            log.error("GitHub Compare API 调用失败 repository={} url={}", fullName, url, e);
-            throw e;
         }
     }
 

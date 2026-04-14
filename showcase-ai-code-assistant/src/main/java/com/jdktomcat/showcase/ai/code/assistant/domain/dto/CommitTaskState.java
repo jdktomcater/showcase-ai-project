@@ -1,12 +1,14 @@
 package com.jdktomcat.showcase.ai.code.assistant.domain.dto;
 
 import com.jdktomcat.showcase.ai.code.assistant.domain.entity.CompareResponse;
+import com.jdktomcat.showcase.ai.code.assistant.dto.AffectedEntryPoint;
 import com.jdktomcat.showcase.ai.code.assistant.utils.JSONUtils;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
 import org.bsc.langgraph4j.state.AgentState;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 @Data
@@ -25,6 +27,7 @@ public class CommitTaskState extends AgentState {
     private Integer deletions;
     private CompareResponse compareResponse;
     private String codeImpactSummary;
+    private List<AffectedEntryPoint> affectedEntryPoints;
     // 下面的字段会在各 Agent 中填充
     private String conventionReport;
     private String securityReport;
@@ -59,6 +62,7 @@ public class CommitTaskState extends AgentState {
         this.deletions = oldState.getDeletions();
         this.compareResponse = oldState.getCompareResponse();
         this.codeImpactSummary = oldState.getCodeImpactSummary();
+        this.affectedEntryPoints = oldState.getAffectedEntryPoints();
         this.conventionReport = oldState.getConventionReport();
         this.securityReport = oldState.getSecurityReport();
         this.performanceReport = oldState.getPerformanceReport();

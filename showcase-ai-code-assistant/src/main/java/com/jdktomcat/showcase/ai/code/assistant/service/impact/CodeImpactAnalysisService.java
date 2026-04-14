@@ -1,6 +1,7 @@
 package com.jdktomcat.showcase.ai.code.assistant.service.impact;
 
 import com.jdktomcat.showcase.ai.code.assistant.domain.entity.CompareResponse;
+import com.jdktomcat.showcase.ai.code.assistant.dto.AffectedEntryPoint;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -106,36 +107,70 @@ public class CodeImpactAnalysisService {
      * 构建影响链路摘要（使用 Impact Chain API）
      */
     public String buildImpactChainSummary(String repository, CompareResponse compareResponse) {
+        return analyzeImpactChain(repository, compareResponse).summary();
+    }
+
+    /**
+     * 构建完整的影响面评估报告（结合依赖图和影响链路）
+     */
+    public String buildFullImpactSummary(String repository, CompareResponse compareResponse) {
+        return analyzeImpact(repository, compareResponse).summary();
+    }
+
+    public ImpactAnalysisResult analyzeImpact(String repository, CompareResponse compareResponse) {
+        log.info("开始构建完整影响面评估报告 repository={}", repository);
+        ImpactChainAnalysis impactChainAnalysis = analyzeImpactChain(repository, compareResponse);
+        StringBuilder report = new StringBuilder();
+        report.append("# 代码变更影响面评估报告\n\n");
+        report.append("## 变更概览\n");
+        report.append("- 仓库：").append(safe(repository)).append('\n');
+        report.append("- 变更文件数：").append(compareResponse != null && compareResponse.getFiles() != null ? compareResponse.getFiles().size() : 0).append("\n\n");
+
+        // 1. 代码依赖图影响面
+        log.debug("构建代码依赖图影响面 repository={}", repository);
+        report.append(buildGraphImpactSummary(repository, compareResponse));
+        report.append("\n\n---\n\n");
+
+        // 2. 业务影响链路
+        log.debug("构建业务影响链路 repository={}", repository);
+        report.append(impactChainAnalysis.summary());
+
+        log.info("完整影响面评估报告构建完成 repository={} report 长度={}", repository, report.length());
+        return new ImpactAnalysisResult(report.toString(), impactChainAnalysis.affectedEntryPoints());
+    }
+
+    private ImpactChainAnalysis analyzeImpactChain(String repository, CompareResponse compareResponse) {
         log.debug("开始构建影响链路摘要 repository={}", repository);
         if (!impactEnabled) {
             log.info("影响链路分析未启用 repository={}", repository);
-            return "影响链路分析未启用。";
+            return new ImpactChainAnalysis("影响链路分析未启用。", List.of());
         }
         if (compareResponse == null || compareResponse.getFiles() == null || compareResponse.getFiles().isEmpty()) {
-            return "本次提交无可用 diff 文件。";
+            return new ImpactChainAnalysis("本次提交无可用 diff 文件。", List.of());
         }
 
         ChangedCodeContext changedContext = resolveChangedCodeContext(compareResponse.getFiles());
         if (changedContext.typeFqns().isEmpty() && changedContext.methodFqns().isEmpty()) {
-            return "未包含可映射到 Java 类型的变更。";
+            return new ImpactChainAnalysis("未包含可映射到 Java 类型的变更。", List.of());
         }
+
+        List<EntryPointInfo> entryPoints = findRelatedEntryPoints(changedContext);
+        List<AffectedEntryPoint> affectedEntryPoints = entryPoints.stream()
+                .map(this::toAffectedEntryPoint)
+                .toList();
 
         StringBuilder summary = new StringBuilder("## 业务影响链路摘要\n");
         summary.append("- 仓库：").append(safe(repository)).append('\n');
         summary.append("- 变更类型数：").append(changedContext.typeFqns().size()).append('\n');
         summary.append("- 变更方法数：").append(changedContext.methodFqns().size()).append('\n');
 
-        log.debug("查找相关入口点 repository={} changedTypes={} changedMethods={}",
-                repository, changedContext.typeFqns().size(), changedContext.methodFqns().size());
-        List<EntryPointInfo> entryPoints = findRelatedEntryPoints(changedContext);
         if (entryPoints.isEmpty()) {
             summary.append("- 未找到与变更直接相关的业务入口点\n");
             log.debug("未找到相关入口点 repository={}", repository);
-            return summary.toString();
+            return new ImpactChainAnalysis(summary.toString(), List.of());
         }
 
         summary.append("- 关联入口点：").append(entryPoints.size()).append(" 个\n\n");
-
         for (EntryPointInfo entryPoint : entryPoints) {
             try {
                 log.debug("查询影响链路 entryPointId={} type={}", entryPoint.getId(), entryPoint.getType());
@@ -169,31 +204,7 @@ public class CodeImpactAnalysisService {
         }
 
         log.debug("影响链路摘要构建完成 repository={} entryPoints={}", repository, entryPoints.size());
-        return summary.toString();
-    }
-
-    /**
-     * 构建完整的影响面评估报告（结合依赖图和影响链路）
-     */
-    public String buildFullImpactSummary(String repository, CompareResponse compareResponse) {
-        log.info("开始构建完整影响面评估报告 repository={}", repository);
-        StringBuilder report = new StringBuilder();
-        report.append("# 代码变更影响面评估报告\n\n");
-        report.append("## 变更概览\n");
-        report.append("- 仓库：").append(safe(repository)).append('\n');
-        report.append("- 变更文件数：").append(compareResponse != null && compareResponse.getFiles() != null ? compareResponse.getFiles().size() : 0).append("\n\n");
-
-        // 1. 代码依赖图影响面
-        log.debug("构建代码依赖图影响面 repository={}", repository);
-        report.append(buildGraphImpactSummary(repository, compareResponse));
-        report.append("\n\n---\n\n");
-
-        // 2. 业务影响链路
-        log.debug("构建业务影响链路 repository={}", repository);
-        report.append(buildImpactChainSummary(repository, compareResponse));
-
-        log.info("完整影响面评估报告构建完成 repository={} report 长度={}", repository, report.length());
-        return report.toString();
+        return new ImpactChainAnalysis(summary.toString(), affectedEntryPoints);
     }
 
     private List<EntryPointInfo> findRelatedEntryPoints(ChangedCodeContext changedContext) {
@@ -272,6 +283,19 @@ public class CodeImpactAnalysisService {
         info.setMethodSignature(safe(entryPoint.get("methodSignature")));
         info.setMetadata(safe(entryPoint.get("metadata")));
         return info;
+    }
+
+    private AffectedEntryPoint toAffectedEntryPoint(EntryPointInfo entryPoint) {
+        Map<String, String> metadata = parseMetadata(entryPoint.getMetadata());
+        return new AffectedEntryPoint(
+                entryPoint.getId(),
+                entryPoint.getType(),
+                metadata.getOrDefault("path", ""),
+                metadata.getOrDefault("httpMethod", ""),
+                entryPoint.getClassName(),
+                entryPoint.getMethodName(),
+                entryPoint.getMethodSignature()
+        );
     }
 
     private DependencyResponse fetchTypeDependencies(String fqn) {
@@ -566,5 +590,17 @@ public class CodeImpactAnalysisService {
         private String methodName;
         private String methodSignature;
         private String metadata;
+    }
+
+    public record ImpactAnalysisResult(
+            String summary,
+            List<AffectedEntryPoint> affectedEntryPoints
+    ) {
+    }
+
+    private record ImpactChainAnalysis(
+            String summary,
+            List<AffectedEntryPoint> affectedEntryPoints
+    ) {
     }
 }

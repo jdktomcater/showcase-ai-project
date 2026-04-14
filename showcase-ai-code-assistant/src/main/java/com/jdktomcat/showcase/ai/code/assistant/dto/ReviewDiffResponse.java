@@ -13,6 +13,7 @@ public record ReviewDiffResponse(
         String finalReport,
         String telegramMessage,
         String codeImpactSummary,
+        java.util.List<AffectedEntryPoint> affectedEntryPoints,
         String businessReport,
         String conventionReport,
         String performanceReport,

@@ -24,6 +24,7 @@ public class CommitReviewService {
     @Qualifier("commitWorkflow")
     private final CompiledGraph<CommitTaskState> commitWorkflow;
     private final CodeImpactAnalysisService codeImpactAnalysisService;
+    private final GitHubCompareClient gitHubCompareClient;
 
     @Value("${github.review.max-diff-length:12000}")
     private int maxDiffLength;
@@ -79,7 +80,7 @@ public class CommitReviewService {
         state.setDiff(buildDiff(compareResponse));
         
         log.debug("开始调用代码影响面分析服务 repository={}", state.getRepository());
-        state.setCodeImpactSummary(codeImpactAnalysisService.buildFullImpactSummary(state.getRepository(), compareResponse));
+        applyImpactAnalysis(state, compareResponse);
         log.debug("代码影响面分析完成 repository={} summary 长度={}", 
                 state.getRepository(), 
                 state.getCodeImpactSummary() != null ? state.getCodeImpactSummary().length() : 0);
@@ -95,6 +96,8 @@ public class CommitReviewService {
 
     private CommitTaskState buildInitialState(ReviewDiffRequest request) {
         CommitTaskState state = new CommitTaskState();
+        CompareResponse compareResponse = resolveCompareResponse(request);
+        List<CompareResponse.FileDiff> files = compareResponse == null ? List.of() : compareResponse.getFiles();
         state.setRepository(defaultString(request.getRepository()));
         state.setBranch(defaultString(request.getBranch()));
         state.setSha(defaultString(request.getSha()));
@@ -102,16 +105,36 @@ public class CommitReviewService {
         state.setEmail(defaultString(request.getEmail()));
         state.setMessage(defaultString(request.getMessage()));
         state.setCompareUrl(defaultString(request.getCompareUrl()));
-        state.setCompareResponse(null);
+        state.setCompareResponse(compareResponse);
         state.setDiff(normalizeDiff(request.getDiff()));
-        state.setChangedFiles(request.getChangedFiles() != null ? request.getChangedFiles() : 0);
-        state.setAdditions(request.getAdditions() != null ? request.getAdditions() : 0);
-        state.setDeletions(request.getDeletions() != null ? request.getDeletions() : 0);
-        state.setCodeImpactSummary(codeImpactAnalysisService.buildFullImpactSummary(state.getRepository(), null));
+        state.setChangedFiles(request.getChangedFiles() != null ? request.getChangedFiles() : files.size());
+        state.setAdditions(request.getAdditions() != null ? request.getAdditions() : sumAdditions(files));
+        state.setDeletions(request.getDeletions() != null ? request.getDeletions() : sumDeletions(files));
+        applyImpactAnalysis(state, compareResponse);
         state.setNeedRetry(false);
         state.setPassed(false);
         state.setDecision("PENDING");
         return state;
+    }
+
+    private void applyImpactAnalysis(CommitTaskState state, CompareResponse compareResponse) {
+        CodeImpactAnalysisService.ImpactAnalysisResult impactAnalysis =
+                codeImpactAnalysisService.analyzeImpact(state.getRepository(), compareResponse);
+        state.setCodeImpactSummary(impactAnalysis.summary());
+        state.setAffectedEntryPoints(impactAnalysis.affectedEntryPoints());
+    }
+
+    private CompareResponse resolveCompareResponse(ReviewDiffRequest request) {
+        if (StringUtils.isBlank(request.getCompareUrl())) {
+            return null;
+        }
+        try {
+            return gitHubCompareClient.fetchCompareByUrl(request.getRepository(), request.getCompareUrl());
+        } catch (Exception ex) {
+            log.warn("通过 compareUrl 拉取 Compare 数据失败 repository={} compareUrl={}",
+                    request.getRepository(), request.getCompareUrl(), ex);
+            return null;
+        }
     }
 
     private PushPayload.Commit getLatestCommit(List<PushPayload.Commit> commits) {
