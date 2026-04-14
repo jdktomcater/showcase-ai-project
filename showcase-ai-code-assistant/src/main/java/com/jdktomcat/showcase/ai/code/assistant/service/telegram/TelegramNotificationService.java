@@ -1,6 +1,7 @@
 package com.jdktomcat.showcase.ai.code.assistant.service.telegram;
 
 import com.jdktomcat.showcase.ai.code.assistant.domain.dto.CommitTaskState;
+import com.jdktomcat.showcase.ai.code.assistant.dto.AffectedEntryPoint;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
@@ -12,6 +13,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 @Slf4j
@@ -73,10 +75,35 @@ public class TelegramNotificationService {
             builder.append('\n').append(state.getFinalReport()).append('\n');
         }
 
+        if (state.getAffectedEntryPoints() != null
+                && !state.getAffectedEntryPoints().isEmpty()
+                && builder.indexOf("影响入口点") < 0) {
+            builder.append('\n')
+                    .append("影响入口点: ")
+                    .append(formatAffectedEntryPoints(state.getAffectedEntryPoints()))
+                    .append('\n');
+        }
+
         if (StringUtils.isNotBlank(state.getCompareUrl())) {
             builder.append('\n').append("Compare: ").append(state.getCompareUrl());
         }
 
         return builder.toString();
+    }
+
+    private String formatAffectedEntryPoints(List<AffectedEntryPoint> affectedEntryPoints) {
+        return affectedEntryPoints.stream()
+                .limit(3)
+                .map(this::toDisplayText)
+                .reduce((left, right) -> left + ", " + right)
+                .orElse("-");
+    }
+
+    private String toDisplayText(AffectedEntryPoint entryPoint) {
+        if (StringUtils.isNotBlank(entryPoint.getRoute())) {
+            return entryPoint.getType() + " " + entryPoint.getRoute() + " -> "
+                    + entryPoint.getClassName() + "#" + entryPoint.getMethodName();
+        }
+        return entryPoint.getType() + " " + entryPoint.getMethodSignature();
     }
 }

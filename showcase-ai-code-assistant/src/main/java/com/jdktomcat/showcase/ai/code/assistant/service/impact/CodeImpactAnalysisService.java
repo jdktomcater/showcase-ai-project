@@ -260,11 +260,106 @@ public class CodeImpactAnalysisService {
                     break;
                 }
             }
-            return new ArrayList<>(matched);
+
+            if (matched.size() < maxTypes) {
+                matched.addAll(matchEntryPointsByImpactChain(allEntryPoints, changedContext, matched));
+            }
+
+            return prioritizeEntryPoints(new ArrayList<>(matched));
         } catch (Exception e) {
             log.warn("获取入口点列表失败", e);
             return List.of();
         }
+    }
+
+    private List<EntryPointInfo> matchEntryPointsByImpactChain(
+            List<EntryPointInfo> allEntryPoints,
+            ChangedCodeContext changedContext,
+            Set<EntryPointInfo> alreadyMatched
+    ) {
+        List<EntryPointInfo> matched = new ArrayList<>();
+        for (EntryPointInfo entryPoint : allEntryPoints) {
+            if (alreadyMatched.contains(entryPoint)) {
+                continue;
+            }
+            try {
+                ImpactChainResult chainResult = fetchImpactChain(entryPoint.getId());
+                if (matchesChangedContext(entryPoint, chainResult, changedContext)) {
+                    matched.add(entryPoint);
+                }
+            } catch (Exception ex) {
+                log.debug("按影响链路回溯入口点失败 entryPointId={}", entryPoint.getId(), ex);
+            }
+            if (alreadyMatched.size() + matched.size() >= maxTypes * 2) {
+                break;
+            }
+        }
+        return matched;
+    }
+
+    private boolean matchesChangedContext(
+            EntryPointInfo entryPoint,
+            ImpactChainResult chainResult,
+            ChangedCodeContext changedContext
+    ) {
+        if (entryPoint.getMethodSignature() != null && changedContext.methodFqns().contains(entryPoint.getMethodSignature())) {
+            return true;
+        }
+        if (entryPoint.getClassName() != null && changedContext.typeFqns().contains(entryPoint.getClassName())) {
+            return true;
+        }
+
+        for (Map<String, Object> node : chainResult.getImpactChain()) {
+            String fqn = safe(node.get("fqn"));
+            String filePath = safe(node.get("filePath"));
+            if (changedContext.methodFqns().contains(fqn)
+                    || changedContext.typeFqns().contains(fqn)
+                    || changedContext.filePaths().contains(filePath)
+                    || changedContext.typeFqns().stream().anyMatch(type -> fqn.startsWith(type + "#"))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private List<EntryPointInfo> prioritizeEntryPoints(List<EntryPointInfo> entryPoints) {
+        if (entryPoints.isEmpty()) {
+            return List.of();
+        }
+
+        entryPoints.sort((left, right) -> {
+            int typeCompare = Integer.compare(entryPointPriority(left), entryPointPriority(right));
+            if (typeCompare != 0) {
+                return typeCompare;
+            }
+            int routeCompare = Boolean.compare(hasRoute(right), hasRoute(left));
+            if (routeCompare != 0) {
+                return routeCompare;
+            }
+            return left.getId().compareTo(right.getId());
+        });
+
+        boolean hasHttp = entryPoints.stream().anyMatch(entryPoint -> "HTTP".equalsIgnoreCase(entryPoint.getType()));
+        return entryPoints.stream()
+                .filter(entryPoint -> !hasHttp || "HTTP".equalsIgnoreCase(entryPoint.getType()))
+                .limit(maxTypes)
+                .toList();
+    }
+
+    private int entryPointPriority(EntryPointInfo entryPoint) {
+        String type = safe(entryPoint.getType()).toUpperCase();
+        return switch (type) {
+            case "HTTP" -> 0;
+            case "RPC" -> 1;
+            case "MQ" -> 2;
+            case "SCHEDULED" -> 3;
+            case "EVENT" -> 4;
+            default -> 9;
+        };
+    }
+
+    private boolean hasRoute(EntryPointInfo entryPoint) {
+        return !formatRoute(entryPoint).isBlank();
     }
 
     private List<EntryPointInfo> loadAllEntryPoints() {
@@ -384,11 +479,13 @@ public class CodeImpactAnalysisService {
     private ChangedCodeContext resolveChangedCodeContext(List<CompareResponse.FileDiff> files) {
         Set<String> changedTypes = new LinkedHashSet<>(extractChangedJavaTypes(files));
         Set<String> changedMethods = new LinkedHashSet<>();
+        Set<String> changedFilePaths = new LinkedHashSet<>();
 
         for (CompareResponse.FileDiff file : files) {
             if (file.getFilename() == null || !file.getFilename().endsWith(".java")) {
                 continue;
             }
+            changedFilePaths.add(file.getFilename());
             for (Integer line : extractChangedLineAnchors(file.getPatch())) {
                 try {
                     LocationResponse response = fetchCodeLocation(file.getFilename(), line);
@@ -408,7 +505,7 @@ public class CodeImpactAnalysisService {
             }
         }
 
-        return new ChangedCodeContext(new ArrayList<>(changedTypes), new ArrayList<>(changedMethods));
+        return new ChangedCodeContext(new ArrayList<>(changedTypes), new ArrayList<>(changedMethods), new ArrayList<>(changedFilePaths));
     }
 
     private List<Integer> extractChangedLineAnchors(String patch) {
@@ -533,7 +630,8 @@ public class CodeImpactAnalysisService {
 
     private record ChangedCodeContext(
             List<String> typeFqns,
-            List<String> methodFqns
+            List<String> methodFqns,
+            List<String> filePaths
     ) {
     }
 
