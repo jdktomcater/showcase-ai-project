@@ -31,6 +31,12 @@ spring:
     date-format: yyyy-MM-dd HH:mm:ss
     time-zone: GMT+8
   ai:
+    retry:
+      max-attempts: ${OLLAMA_RETRY_MAX_ATTEMPTS:3}
+      backoff:
+        initial-interval: ${OLLAMA_RETRY_INITIAL_INTERVAL:800ms}
+        multiplier: ${OLLAMA_RETRY_BACKOFF_MULTIPLIER:2}
+        max-interval: ${OLLAMA_RETRY_MAX_INTERVAL:5s}
     ollama:
       init:
         timeout: ${OLLAMA_INIT_TIMEOUT:30s}
@@ -47,7 +53,7 @@ spring:
           model: ${OLLAMA_CHAT_MODEL:gpt-oss:120b-cloud}
           keep_alive: ${OLLAMA_CHAT_KEEP_ALIVE:30m}
           temperature: ${OLLAMA_CHAT_TEMPERATURE:0.1}
-          num-predict: ${OLLAMA_CHAT_NUM_PREDICT:1200}
+          num-predict: ${OLLAMA_CHAT_NUM_PREDICT:800}
           num-ctx: ${OLLAMA_CHAT_NUM_CTX:4096}
 
 app:
@@ -55,6 +61,11 @@ app:
     review:
       enabled: ${AI_REVIEW_ENABLED:true}
       fail-open: ${AI_REVIEW_FAIL_OPEN:true}
+      final-section-max-chars: ${AI_REVIEW_FINAL_SECTION_MAX_CHARS:1800}
+    ollama:
+      max-concurrent-calls: ${OLLAMA_MAX_CONCURRENT_CALLS:1}
+      acquire-timeout: ${OLLAMA_ACQUIRE_TIMEOUT:20s}
+      prompt-max-chars: ${OLLAMA_PROMPT_MAX_CHARS:12000}
   webhook:
     executor:
       core-pool-size: ${WEBHOOK_EXECUTOR_CORE_POOL_SIZE:1}

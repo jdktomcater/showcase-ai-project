@@ -6,6 +6,7 @@ import com.jdktomcat.showcase.ai.code.assistant.service.ai.ReviewChatService;
 import com.jdktomcat.showcase.ai.code.assistant.utils.JSONUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.bsc.langgraph4j.action.NodeAction;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
@@ -21,11 +22,20 @@ public class CommitResultAgent implements NodeAction<CommitTaskState> {
 
     private final ReviewChatService reviewChatService;
 
+    @Value("${app.ai.review.final-section-max-chars:1800}")
+    private int finalSectionMaxChars;
+
     public CommitResultAgent(ReviewChatService reviewChatService) {
         this.reviewChatService = reviewChatService;
     }
 
     public void validate(CommitTaskState state) {
+        String compactImpactSummary = compactForPrompt(state.getCodeImpactSummary());
+        String compactBusinessReport = compactForPrompt(state.getBusinessReport());
+        String compactConventionReport = compactForPrompt(state.getConventionReport());
+        String compactPerformanceReport = compactForPrompt(state.getPerformanceReport());
+        String compactSecurityReport = compactForPrompt(state.getSecurityReport());
+
         String prompt = String.format("""
                 你是最终提交评审裁决专家。请综合 4 个专项审查报告，对本次提交是否允许通过给出最终结论。
                 判断原则：
@@ -78,11 +88,11 @@ public class CommitResultAgent implements NodeAction<CommitTaskState> {
                 Objects.toString(state.getDeletions(), "0"),
                 state.getCompareUrl(),
                 formatAffectedEntryPoints(state.getAffectedEntryPoints()),
-                state.getCodeImpactSummary(),
-                state.getBusinessReport(),
-                state.getConventionReport(),
-                state.getPerformanceReport(),
-                state.getSecurityReport()
+                compactImpactSummary,
+                compactBusinessReport,
+                compactConventionReport,
+                compactPerformanceReport,
+                compactSecurityReport
         );
         String validationResult = reviewChatService.callOrFallback(
                 "final-decision",
@@ -138,6 +148,25 @@ public class CommitResultAgent implements NodeAction<CommitTaskState> {
                 .map(this::shortEntryPointLabel)
                 .reduce((left, right) -> left + ", " + right)
                 .orElse("-");
+    }
+
+    private String compactForPrompt(String content) {
+        if (content == null || content.isBlank()) {
+            return "-";
+        }
+        String normalized = content.trim();
+        int safeMaxChars = Math.max(400, finalSectionMaxChars);
+        if (normalized.length() <= safeMaxChars) {
+            return normalized;
+        }
+        int headLength = Math.max(200, safeMaxChars * 2 / 3);
+        int tailLength = Math.max(80, safeMaxChars - headLength);
+        if (headLength + tailLength >= normalized.length()) {
+            return normalized.substring(0, safeMaxChars);
+        }
+        return normalized.substring(0, headLength)
+                + "\n...[内容截断，减少模型超时风险]...\n"
+                + normalized.substring(normalized.length() - tailLength);
     }
 
     private String formatAffectedEntryPoints(List<AffectedEntryPoint> affectedEntryPoints) {
