@@ -227,8 +227,9 @@ public class CodeImpactAnalysisService {
             Map<String, List<EntryPointInfo>> entryPointsByClass = new LinkedHashMap<>();
             for (EntryPointInfo entryPoint : allEntryPoints) {
                 if (entryPoint.getMethodSignature() != null && !entryPoint.getMethodSignature().isBlank()) {
-                    entryPointByMethod.put(entryPoint.getMethodSignature(), entryPoint);
-                    entryPointByMethodNoArgs.put(stripMethodArgs(entryPoint.getMethodSignature()), entryPoint);
+                    String normalizedMethodSignature = normalizeMethodSignature(entryPoint.getMethodSignature());
+                    entryPointByMethod.put(normalizedMethodSignature, entryPoint);
+                    entryPointByMethodNoArgs.put(stripMethodArgs(normalizedMethodSignature), entryPoint);
                 }
                 if (entryPoint.getClassName() != null && !entryPoint.getClassName().isBlank()) {
                     entryPointsByClass.computeIfAbsent(entryPoint.getClassName(), key -> new ArrayList<>())
@@ -495,17 +496,18 @@ public class CodeImpactAnalysisService {
             Map<String, List<EntryPointInfo>> entryPointsByClass,
             Set<EntryPointInfo> matched
     ) {
-        EntryPointInfo exactMethodMatch = entryPointByMethod.get(impactedFqn);
+        String normalizedImpactedFqn = normalizeMethodSignature(impactedFqn);
+        EntryPointInfo exactMethodMatch = entryPointByMethod.get(normalizedImpactedFqn);
         if (exactMethodMatch != null) {
             matched.add(exactMethodMatch);
         }
 
-        EntryPointInfo normalizedMethodMatch = entryPointByMethodNoArgs.get(stripMethodArgs(impactedFqn));
+        EntryPointInfo normalizedMethodMatch = entryPointByMethodNoArgs.get(stripMethodArgs(normalizedImpactedFqn));
         if (normalizedMethodMatch != null) {
             matched.add(normalizedMethodMatch);
         }
 
-        String impactedClassName = extractClassName(impactedFqn);
+        String impactedClassName = extractClassName(normalizedImpactedFqn);
         if (impactedClassName.isBlank()) {
             return;
         }
@@ -537,6 +539,157 @@ public class CodeImpactAnalysisService {
         return fqn;
     }
 
+    private String normalizeMethodSignature(String methodSignature) {
+        if (methodSignature == null || methodSignature.isBlank()) {
+            return "";
+        }
+        String normalized = methodSignature.trim().replaceAll("\\s+", "");
+        if (normalized.indexOf('#') >= 0) {
+            return normalized;
+        }
+        int leftBracket = normalized.indexOf('(');
+        if (leftBracket < 0) {
+            return normalized;
+        }
+        int separator = normalized.lastIndexOf('.', leftBracket);
+        if (separator > 0) {
+            return normalized.substring(0, separator) + "#" + normalized.substring(separator + 1);
+        }
+        return normalized;
+    }
+
+    private List<Map<String, Object>> fetchMethodImpactWithCompatibility(
+            String methodFqn,
+            Map<String, List<String>> ownerAliasCache
+    ) {
+        List<Map<String, Object>> merged = new ArrayList<>();
+        Set<String> seenCallerMethods = new LinkedHashSet<>();
+        for (String candidateMethodFqn : buildMethodImpactCandidates(methodFqn, ownerAliasCache)) {
+            try {
+                ImpactResponse impactResponse = fetchMethodImpact(candidateMethodFqn);
+                for (Map<String, Object> impact : impactResponse.getImpacts()) {
+                    String callerMethod = normalizeMethodSignature(safe(impact.get("fqn")));
+                    if (callerMethod.isBlank() || "-".equals(callerMethod) || !seenCallerMethods.add(callerMethod)) {
+                        continue;
+                    }
+                    merged.add(impact);
+                }
+            } catch (Exception ex) {
+                log.debug("按兼容签名查询方法影响失败 method={} candidate={}", methodFqn, candidateMethodFqn, ex);
+            }
+        }
+        return merged;
+    }
+
+    private List<String> buildMethodImpactCandidates(
+            String methodFqn,
+            Map<String, List<String>> ownerAliasCache
+    ) {
+        Set<String> candidates = new LinkedHashSet<>();
+        if (methodFqn != null && !methodFqn.isBlank()) {
+            candidates.add(methodFqn);
+        }
+
+        String normalized = normalizeMethodSignature(methodFqn);
+        if (normalized.isBlank()) {
+            return new ArrayList<>(candidates);
+        }
+
+        candidates.add(normalized);
+        String dotStyle = toDotStyleMethodSignature(normalized);
+        if (!dotStyle.isBlank()) {
+            candidates.add(dotStyle);
+        }
+
+        int separator = normalized.indexOf('#');
+        if (separator > 0) {
+            String ownerType = normalized.substring(0, separator);
+            String methodSuffix = normalized.substring(separator);
+            for (String aliasOwner : resolveRelatedOwners(ownerType, ownerAliasCache)) {
+                String aliasSignature = aliasOwner + methodSuffix;
+                candidates.add(aliasSignature);
+                String aliasDotStyle = toDotStyleMethodSignature(aliasSignature);
+                if (!aliasDotStyle.isBlank()) {
+                    candidates.add(aliasDotStyle);
+                }
+            }
+        }
+        return new ArrayList<>(candidates);
+    }
+
+    private String toDotStyleMethodSignature(String methodSignature) {
+        if (methodSignature == null || methodSignature.isBlank()) {
+            return "";
+        }
+        int separator = methodSignature.indexOf('#');
+        if (separator <= 0) {
+            return methodSignature;
+        }
+        return methodSignature.substring(0, separator) + "." + methodSignature.substring(separator + 1);
+    }
+
+    private List<String> resolveRelatedOwners(
+            String ownerType,
+            Map<String, List<String>> ownerAliasCache
+    ) {
+        if (ownerType == null || ownerType.isBlank()) {
+            return List.of();
+        }
+        return ownerAliasCache.computeIfAbsent(ownerType, this::loadRelatedOwners);
+    }
+
+    private List<String> loadRelatedOwners(String ownerType) {
+        Set<String> relatedOwners = new LinkedHashSet<>();
+        try {
+            DependencyResponse dependencies = fetchTypeDependencies(ownerType);
+            for (Map<String, Object> dependency : dependencies.getDependencies()) {
+                if (!containsTypeHierarchyRelation(dependency.get("relationTypes"))) {
+                    continue;
+                }
+                String fqn = safe(dependency.get("fqn"));
+                if (!fqn.isBlank() && !"-".equals(fqn)) {
+                    relatedOwners.add(fqn);
+                }
+            }
+        } catch (Exception ex) {
+            log.debug("读取类型依赖用于方法别名回溯失败 type={}", ownerType, ex);
+        }
+
+        try {
+            ImpactResponse impacts = fetchTypeImpact(ownerType);
+            for (Map<String, Object> impact : impacts.getImpacts()) {
+                if (!containsTypeHierarchyRelation(impact.get("relationTypes"))) {
+                    continue;
+                }
+                String fqn = safe(impact.get("fqn"));
+                if (!fqn.isBlank() && !"-".equals(fqn)) {
+                    relatedOwners.add(fqn);
+                }
+            }
+        } catch (Exception ex) {
+            log.debug("读取类型影响用于方法别名回溯失败 type={}", ownerType, ex);
+        }
+
+        relatedOwners.remove(ownerType);
+        if (relatedOwners.isEmpty()) {
+            return List.of();
+        }
+        return relatedOwners.stream().limit(maxTypes).toList();
+    }
+
+    private boolean containsTypeHierarchyRelation(Object relationTypes) {
+        if (!(relationTypes instanceof List<?> types) || types.isEmpty()) {
+            return false;
+        }
+        for (Object relationType : types) {
+            String normalized = safe(relationType).toUpperCase();
+            if ("IMPLEMENTS".equals(normalized) || "EXTENDS".equals(normalized)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private List<EntryPointInfo> traceEntryPointsByCallGraph(
             List<String> changedMethods,
             Map<String, EntryPointInfo> entryPointByMethod
@@ -544,16 +697,18 @@ public class CodeImpactAnalysisService {
         Set<EntryPointInfo> matched = new LinkedHashSet<>();
         Set<String> visitedMethods = new LinkedHashSet<>();
         ArrayDeque<MethodTraceNode> queue = new ArrayDeque<>();
+        Map<String, List<String>> ownerAliasCache = new LinkedHashMap<>();
 
         for (String methodFqn : changedMethods) {
             if (methodFqn == null || methodFqn.isBlank()) {
                 continue;
             }
-            EntryPointInfo directEntryPoint = entryPointByMethod.get(methodFqn);
+            String normalizedMethodFqn = normalizeMethodSignature(methodFqn);
+            EntryPointInfo directEntryPoint = entryPointByMethod.get(normalizedMethodFqn);
             if (directEntryPoint != null) {
                 matched.add(directEntryPoint);
             }
-            if (visitedMethods.add(methodFqn)) {
+            if (visitedMethods.add(normalizedMethodFqn)) {
                 queue.addLast(new MethodTraceNode(methodFqn, 0));
             }
         }
@@ -564,14 +719,18 @@ public class CodeImpactAnalysisService {
                 continue;
             }
 
-            ImpactResponse impactResponse = fetchMethodImpact(current.methodFqn());
-            for (Map<String, Object> impact : impactResponse.getImpacts()) {
-                String callerMethod = safe(impact.get("fqn"));
-                if (callerMethod.isBlank() || "-".equals(callerMethod)) {
+            List<Map<String, Object>> impacts = fetchMethodImpactWithCompatibility(
+                    current.methodFqn(),
+                    ownerAliasCache
+            );
+            for (Map<String, Object> impact : impacts) {
+                String callerMethodRaw = safe(impact.get("fqn"));
+                String callerMethodNormalized = normalizeMethodSignature(callerMethodRaw);
+                if (callerMethodNormalized.isBlank() || "-".equals(callerMethodNormalized)) {
                     continue;
                 }
 
-                EntryPointInfo callerEntryPoint = entryPointByMethod.get(callerMethod);
+                EntryPointInfo callerEntryPoint = entryPointByMethod.get(callerMethodNormalized);
                 if (callerEntryPoint != null) {
                     matched.add(callerEntryPoint);
                     if (matched.size() >= maxTypes) {
@@ -579,8 +738,8 @@ public class CodeImpactAnalysisService {
                     }
                 }
 
-                if (visitedMethods.add(callerMethod)) {
-                    queue.addLast(new MethodTraceNode(callerMethod, current.depth() + 1));
+                if (visitedMethods.add(callerMethodNormalized)) {
+                    queue.addLast(new MethodTraceNode(callerMethodRaw, current.depth() + 1));
                 }
             }
         }
