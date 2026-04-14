@@ -73,7 +73,7 @@ class JavaDependencyAnalyzerTest {
                 .anyMatch(node -> "TYPE:com.example.BaseService".equals(node.id()))
                 .anyMatch(node -> "TYPE:com.example.GreetingPort".equals(node.id()))
                 .anyMatch(node -> "METHOD:com.example.HelloService#hello(java.lang.String)".equals(node.id()))
-                .anyMatch(node -> "METHOD:com.example.SupportClient.load(java.lang.String)".equals(node.id()));
+                .anyMatch(node -> "METHOD:com.example.SupportClient#load(java.lang.String)".equals(node.id()));
 
         String helloTypeId = "TYPE:com.example.HelloService";
         String helloMethodId = "METHOD:com.example.HelloService#hello(java.lang.String)";
@@ -101,7 +101,7 @@ class JavaDependencyAnalyzerTest {
                         && relation.toId().equals("TYPE:java.lang.String")
                         && relation.type() == RelationType.HAS_PARAM_TYPE)
                 .anyMatch(relation -> relation.fromId().equals(helloMethodId)
-                        && relation.toId().equals("METHOD:com.example.SupportClient.load(java.lang.String)")
+                        && relation.toId().equals("METHOD:com.example.SupportClient#load(java.lang.String)")
                         && relation.type() == RelationType.CALLS);
     }
 

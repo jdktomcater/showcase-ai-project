@@ -274,8 +274,8 @@ public class JavaDependencyAnalyzer {
             String name = exec.getSimpleName();
             String parameters = exec.getParameters().stream()
                     .map(this::qualifiedTypeName)
-                    .collect(Collectors.joining(","));
-            return Optional.of(ownerName + "." + name + "(" + parameters + ")");
+                    .collect(Collectors.joining(", "));
+            return Optional.of(ownerName + "#" + name + "(" + parameters + ")");
         } catch (RuntimeException ex) {
             log.debug("Failed to resolve method call: {}", call, ex);
             return Optional.empty();
