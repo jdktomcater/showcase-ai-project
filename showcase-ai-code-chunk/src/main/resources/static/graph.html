@@ -36,6 +36,10 @@
             gap: 6px;
             margin-bottom: 12px;
         }
+        .button-row {
+            display: flex;
+            gap: 8px;
+        }
         .field label {
             font-size: 13px;
             color: #cbd5e1;
@@ -63,6 +67,16 @@
         }
         .field button:hover {
             background: #1d4ed8;
+        }
+        .field button.secondary {
+            background: #334155;
+        }
+        .field button.secondary:hover {
+            background: #475569;
+        }
+        .field button:disabled {
+            cursor: wait;
+            opacity: 0.7;
         }
         .hint,
         .summary,
@@ -180,7 +194,10 @@
             <input id="depth" type="number" min="1" max="10" value="2">
         </div>
         <div class="field">
-            <button id="loadButton" type="button">加载图谱</button>
+            <div class="button-row">
+                <button id="loadButton" type="button">加载图谱</button>
+                <button id="refreshButton" class="secondary" type="button">刷新依赖图</button>
+            </div>
         </div>
         <div class="hint">`dependencies` 使用 `nodeType + fqn` 查询。`impact` 使用 `methodFqn` 查询调用影响链。`classgraph` 会全量加载 Neo4j 中所有类节点及类间依赖关系。</div>
         <div class="legend">
@@ -211,6 +228,7 @@
     const detailsEl = document.getElementById("details");
     const statusEl = document.getElementById("status");
     const loadButton = document.getElementById("loadButton");
+    const refreshButton = document.getElementById("refreshButton");
     const tooltipEl = document.getElementById("tooltip");
 
     const svg = d3.select("#network");
@@ -236,6 +254,11 @@
 
     function setStatus(text) {
         statusEl.textContent = text;
+    }
+
+    function setButtonsDisabled(disabled) {
+        loadButton.disabled = disabled;
+        refreshButton.disabled = disabled;
     }
 
     function nodeColor(node) {
@@ -553,6 +576,7 @@
     async function loadGraph() {
         const payload = buildPayload();
         setStatus("Loading...");
+        setButtonsDisabled(true);
         summaryEl.textContent = "正在加载图数据...";
         detailsEl.textContent = "点击节点或连线查看详情，拖拽节点可固定位置，滚轮可缩放。";
 
@@ -577,7 +601,44 @@
             setStatus("Error");
             summaryEl.textContent = `加载失败: ${error.message}`;
             rootGroup.selectAll("*").remove();
+        } finally {
+            setButtonsDisabled(false);
         }
+    }
+
+    async function rebuildGraph() {
+        setStatus("Rebuilding...");
+        setButtonsDisabled(true);
+        summaryEl.textContent = "正在重新构建依赖图，请稍候...";
+        detailsEl.textContent = "重建完成后会按当前条件自动重新加载图谱。";
+
+        try {
+            const response = await fetch("/api/code/graph/index", {
+                method: "POST"
+            });
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(errorText || "Rebuild request failed");
+            }
+
+            const result = await response.json();
+            summaryEl.textContent =
+                "依赖图重建完成\n" +
+                `files: ${result.files ?? "-"}\n` +
+                `nodes: ${result.nodes ?? "-"}\n` +
+                `relations: ${result.relations ?? "-"}\n` +
+                `skippedFiles: ${result.skippedFiles ?? "-"}`;
+            setStatus("Rebuilt");
+        } catch (error) {
+            setStatus("Error");
+            summaryEl.textContent = `重建失败: ${error.message}`;
+            detailsEl.textContent = "依赖图重建失败，请检查后端日志。";
+            setButtonsDisabled(false);
+            return;
+        }
+
+        await loadGraph();
     }
 
     window.addEventListener("resize", () => {
@@ -589,6 +650,7 @@
     });
 
     loadButton.addEventListener("click", loadGraph);
+    refreshButton.addEventListener("click", rebuildGraph);
     modeInput.addEventListener("change", updateModeFields);
 
     updateModeFields();
