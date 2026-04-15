@@ -30,6 +30,7 @@ public class CommitResultAgent implements NodeAction<CommitTaskState> {
     }
 
     public void validate(CommitTaskState state) {
+        boolean allSpecialReportsUnavailable = areAllSpecialReportsUnavailable(state);
         String compactImpactSummary = compactForPrompt(state.getCodeImpactSummary());
         String compactBusinessReport = compactForPrompt(state.getBusinessReport());
         String compactConventionReport = compactForPrompt(state.getConventionReport());
@@ -100,11 +101,11 @@ public class CommitResultAgent implements NodeAction<CommitTaskState> {
             validationResult = reviewChatService.callOrFallback(
                     "final-decision-compact",
                     buildCompactDecisionPrompt(state),
-                    this::fallbackDecisionJson
+                    () -> fallbackDecisionJson(allSpecialReportsUnavailable)
             );
         }
         if (isBlankResponse(validationResult)) {
-            validationResult = fallbackDecisionJson();
+            validationResult = fallbackDecisionJson(allSpecialReportsUnavailable);
         }
         log.info("提交裁决原始结果：{}", validationResult);
         Map<String, Object> result;
@@ -223,15 +224,42 @@ public class CommitResultAgent implements NodeAction<CommitTaskState> {
         return value == null || value.isBlank();
     }
 
-    private String fallbackDecisionJson() {
+    private String fallbackDecisionJson(boolean allSpecialReportsUnavailable) {
+        if (allSpecialReportsUnavailable) {
+            return """
+                    {
+                      "decision": "PASS",
+                      "summary": "AI 模型当前不可用，已返回降级评审结果，请结合专项报告人工复核",
+                      "finalReport": "## 总体结论\\nPASS\\n\\n## 关键风险\\n- AI 模型当前不可用，最终结论基于降级逻辑生成。\\n- 业务、性能、安全专项报告可能为兜底内容，需要人工复核。\\n\\n## 建议动作\\n- 检查 OLLAMA_BASE_URL、OLLAMA_CHAT_MODEL 或切换到可用云模型后重新执行评审。\\n- 在模型恢复前，将本次评审视为非阻断参考结果。",
+                      "telegramMessage": "结论: PASS\\n原因: AI 模型当前不可用，已返回降级评审结果，请人工复核。"
+                    }
+                    """;
+        }
         return """
                 {
                   "decision": "PASS",
-                  "summary": "AI 模型当前不可用，已返回降级评审结果，请结合专项报告人工复核",
-                  "finalReport": "## 总体结论\\nPASS\\n\\n## 关键风险\\n- AI 模型当前不可用，最终结论基于降级逻辑生成。\\n- 业务、性能、安全专项报告可能为兜底内容，需要人工复核。\\n\\n## 建议动作\\n- 检查 OLLAMA_BASE_URL、OLLAMA_CHAT_MODEL 或切换到可用云模型后重新执行评审。\\n- 在模型恢复前，将本次评审视为非阻断参考结果。",
-                  "telegramMessage": "结论: PASS\\n原因: AI 模型当前不可用，已返回降级评审结果，请人工复核。"
+                  "summary": "最终裁决模型未返回有效结果，已返回降级评审结论，请结合专项报告人工复核",
+                  "finalReport": "## 总体结论\\nPASS\\n\\n## 关键风险\\n- 最终裁决模型未返回有效结果，当前结论基于降级逻辑生成。\\n- 至少部分专项报告已正常产出，请以专项报告为主进行复核。\\n\\n## 建议动作\\n- 优先根据业务/规范/性能/安全专项报告确认发布风险。\\n- 如需统一裁决结论，可在模型恢复后重新执行最终裁决。",
+                  "telegramMessage": "结论: PASS\\n原因: 最终裁决模型未返回有效结果，请优先参考专项报告并人工复核。"
                 }
                 """;
+    }
+
+    private boolean areAllSpecialReportsUnavailable(CommitTaskState state) {
+        return isUnavailableReport(state.getBusinessReport())
+                && isUnavailableReport(state.getConventionReport())
+                && isUnavailableReport(state.getPerformanceReport())
+                && isUnavailableReport(state.getSecurityReport());
+    }
+
+    private boolean isUnavailableReport(String report) {
+        if (report == null || report.isBlank()) {
+            return true;
+        }
+        String normalized = report.replace(" ", "");
+        return normalized.contains("AI模型当前不可用")
+                || normalized.contains("未完成自动")
+                || normalized.contains("模型恢复后重新");
     }
 
     private String formatAffectedEntryPoints(List<AffectedEntryPoint> affectedEntryPoints) {
