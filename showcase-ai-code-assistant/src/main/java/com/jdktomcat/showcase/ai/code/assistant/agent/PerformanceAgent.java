@@ -21,16 +21,18 @@ public class PerformanceAgent implements NodeAction<CommitTaskState> {
     /** 根据 diff 生成规范审查报告 */
     public void review(CommitTaskState state) {
         String prompt = String.format("""
-        你是性能风险审查专家，请分析下面的代码改动，识别性能瓶颈、扩展性风险和资源消耗问题。
-        请用中文并按以下 Markdown 结构输出：
+        你是性能风险审查专家。基于 Diff 识别性能、扩展性和资源开销风险。
+        重点关注：循环复杂度、IO/数据库/远程调用、并发竞争、缓存命中、对象与连接资源管理。
+        仅用中文，严格按以下 Markdown 输出：
+        总字数尽量控制在 220 字内。
         ## 结论
         风险等级：低风险 / 中风险 / 高风险
         
         ## 发现
-        - 最多 3 条，重点关注循环、IO、数据库调用、缓存、并发、远程调用
+        - 最多 3 条
         
         ## 建议
-        - 最多 3 条，给出可执行优化建议；如果没有明显问题，明确写“未发现显著性能风险”
+        - 最多 3 条；无明显问题时写“未发现显著性能风险”
         
         提交上下文：
         - 仓库：%s

@@ -30,11 +30,11 @@ public class ReviewChatService {
     @Value("${app.ai.ollama.max-concurrent-calls:1}")
     private int maxConcurrentCalls = 1;
 
-    @Value("${app.ai.ollama.acquire-timeout:20s}")
-    private Duration acquireTimeout = Duration.ofSeconds(20);
+    @Value("${app.ai.ollama.acquire-timeout:8s}")
+    private Duration acquireTimeout = Duration.ofSeconds(8);
 
-    @Value("${app.ai.ollama.prompt-max-chars:12000}")
-    private int promptMaxChars = 12000;
+    @Value("${app.ai.ollama.prompt-max-chars:7000}")
+    private int promptMaxChars = 7000;
 
     private Semaphore callSemaphore;
 

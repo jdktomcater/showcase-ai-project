@@ -26,8 +26,11 @@ public class CommitReviewService {
     private final CodeImpactAnalysisService codeImpactAnalysisService;
     private final GitHubCompareClient gitHubCompareClient;
 
-    @Value("${github.review.max-diff-length:12000}")
+    @Value("${github.review.max-diff-length:5000}")
     private int maxDiffLength;
+
+    @Value("${code-chunk.impact.max-files-for-analysis:20}")
+    private int impactMaxFilesForAnalysis;
 
     public CommitTaskState reviewPush(PushPayload pushPayload, CompareResponse compareResponse) {
         String repository = pushPayload.getRepository() != null ? pushPayload.getRepository().getFullName() : "unknown";
@@ -118,10 +121,35 @@ public class CommitReviewService {
     }
 
     private void applyImpactAnalysis(CommitTaskState state, CompareResponse compareResponse) {
+        if (shouldSkipHeavyImpactAnalysis(compareResponse)) {
+            int fileCount = compareResponse != null && compareResponse.getFiles() != null ? compareResponse.getFiles().size() : 0;
+            String quickSummary = String.format("""
+                    ## 代码依赖图影响面摘要
+                    - 仓库：%s
+                    - 变更文件数：%s
+                    - 已启用快速模式：变更文件数超过阈值（%s），跳过重型依赖图/影响链路查询以降低时延。
+                    - 建议：如需完整影响面，请调大 code-chunk.impact.max-files-for-analysis 并重试。
+                    """,
+                    defaultString(state.getRepository()),
+                    fileCount,
+                    Math.max(1, impactMaxFilesForAnalysis)
+            );
+            state.setCodeImpactSummary(quickSummary);
+            state.setAffectedEntryPoints(List.of());
+            return;
+        }
         CodeImpactAnalysisService.ImpactAnalysisResult impactAnalysis =
                 codeImpactAnalysisService.analyzeImpact(state.getRepository(), compareResponse);
         state.setCodeImpactSummary(impactAnalysis.summary());
         state.setAffectedEntryPoints(impactAnalysis.affectedEntryPoints());
+    }
+
+    private boolean shouldSkipHeavyImpactAnalysis(CompareResponse compareResponse) {
+        if (compareResponse == null || compareResponse.getFiles() == null) {
+            return false;
+        }
+        int safeMaxFiles = Math.max(1, impactMaxFilesForAnalysis);
+        return compareResponse.getFiles().size() > safeMaxFiles;
     }
 
     private CompareResponse resolveCompareResponse(ReviewDiffRequest request) {

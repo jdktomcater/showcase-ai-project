@@ -22,7 +22,7 @@ public class CommitResultAgent implements NodeAction<CommitTaskState> {
 
     private final ReviewChatService reviewChatService;
 
-    @Value("${app.ai.review.final-section-max-chars:1800}")
+    @Value("${app.ai.review.final-section-max-chars:900}")
     private int finalSectionMaxChars;
 
     public CommitResultAgent(ReviewChatService reviewChatService) {
@@ -37,19 +37,19 @@ public class CommitResultAgent implements NodeAction<CommitTaskState> {
         String compactSecurityReport = compactForPrompt(state.getSecurityReport());
 
         String prompt = String.format("""
-                你是最终提交评审裁决专家。请综合 4 个专项审查报告，对本次提交是否允许通过给出最终结论。
-                判断原则：
-                1. 如果存在明确高风险安全问题、关键业务逻辑缺失、显著性能风险、或严重规范问题导致可维护性/可运行性受损，则判定 FAIL。
-                2. 如果只有一般性优化建议、非阻断告警、或低风险规范问题，则判定 PASS。
-                3. 输出必须是合法 JSON，禁止输出 Markdown 代码块。
-                
-                JSON 结构如下：
-                {
-                  "decision": "PASS 或 FAIL",
-                  "summary": "一句话总结该提交的总体风险",
-                  "finalReport": "Markdown 格式的最终汇总，包含“## 总体结论”“## 关键风险”“## 建议动作”三个部分",
-                  "telegramMessage": "适合直接发到 Telegram 的简洁 Markdown 文本"
-                }
+                你是最终提交评审裁决专家。请综合 4 个专项报告给出 PASS/FAIL。
+                判定规则：
+                - FAIL：存在高风险安全问题、关键业务链路受损、显著性能风险、或严重规范问题影响可运行/可维护性。
+                - PASS：仅有一般优化建议或低风险问题。
+                输出要求：
+                - 只输出合法 JSON，不要 Markdown 代码块。
+                - decision 只能是 "PASS" 或 "FAIL"。
+                - finalReport 必须包含“## 总体结论”“## 关键风险”“## 建议动作”。
+                - summary 尽量不超过 50 字。
+                - finalReport 总字数尽量不超过 260 字。
+                - telegramMessage 尽量不超过 120 字。
+                JSON 字段：
+                {"decision":"PASS/FAIL","summary":"...","finalReport":"...","telegramMessage":"..."}
                 
                 提交上下文：
                 - 仓库：%s

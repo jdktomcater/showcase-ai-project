@@ -39,13 +39,13 @@ public class CodeImpactAnalysisService {
     @Value("${code-chunk.impact.enabled:true}")
     private boolean impactEnabled;
 
-    @Value("${code-chunk.impact.depth:3}")
+    @Value("${code-chunk.impact.depth:1}")
     private int impactDepth;
 
-    @Value("${code-chunk.impact.max-types:10}")
+    @Value("${code-chunk.impact.max-types:3}")
     private int maxTypes;
 
-    @Value("${code-chunk.impact.max-items-per-type:10}")
+    @Value("${code-chunk.impact.max-items-per-type:3}")
     private int maxItemsPerType;
 
     /**

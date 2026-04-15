@@ -23,16 +23,18 @@ public class ConventionAgent implements NodeAction<CommitTaskState> {
      */
     public void review(CommitTaskState state) {
         String prompt = String.format("""
-                你是代码规范审查专家。请检查以下提交 diff，并用中文输出 Markdown 报告。
-                输出结构必须是：
+                你是代码规范审查专家。基于 Diff 识别可读性和可维护性风险。
+                重点关注：命名、异常处理、风格一致性、重复逻辑、可测试性。
+                仅用中文，严格按以下 Markdown 输出：
+                总字数尽量控制在 220 字内。
                 ## 结论
                 风险等级：低风险 / 中风险 / 高风险
                 
                 ## 发现
-                - 最多 3 条，聚焦命名、可读性、异常处理、可维护性、风格一致性
+                - 最多 3 条
                 
                 ## 建议
-                - 最多 3 条；如果没有明显问题，明确写“规范层面可接受”
+                - 最多 3 条；无明显问题时写“规范层面可接受”
                 
                 提交上下文：
                 - 仓库：%s

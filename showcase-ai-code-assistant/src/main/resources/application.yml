@@ -7,15 +7,16 @@ github:
   api:
     token: ${GITHUB_API_TOKEN}
   review:
-    max-diff-length: ${GITHUB_REVIEW_MAX_DIFF_LENGTH:8000}
+    max-diff-length: ${GITHUB_REVIEW_MAX_DIFF_LENGTH:5000}
 
 code-chunk:
   base-url: ${CODE_CHUNK_BASE_URL:http://localhost:8081}
   impact:
     enabled: ${CODE_CHUNK_IMPACT_ENABLED:true}
-    depth: ${CODE_CHUNK_IMPACT_DEPTH:2}
-    max-types: ${CODE_CHUNK_IMPACT_MAX_TYPES:5}
-    max-items-per-type: ${CODE_CHUNK_IMPACT_MAX_ITEMS_PER_TYPE:5}
+    depth: ${CODE_CHUNK_IMPACT_DEPTH:1}
+    max-types: ${CODE_CHUNK_IMPACT_MAX_TYPES:3}
+    max-items-per-type: ${CODE_CHUNK_IMPACT_MAX_ITEMS_PER_TYPE:3}
+    max-files-for-analysis: ${CODE_CHUNK_IMPACT_MAX_FILES_FOR_ANALYSIS:20}
 
 telegram:
   bot:
@@ -32,11 +33,11 @@ spring:
     time-zone: GMT+8
   ai:
     retry:
-      max-attempts: ${OLLAMA_RETRY_MAX_ATTEMPTS:3}
+      max-attempts: ${OLLAMA_RETRY_MAX_ATTEMPTS:1}
       backoff:
-        initial-interval: ${OLLAMA_RETRY_INITIAL_INTERVAL:800ms}
+        initial-interval: ${OLLAMA_RETRY_INITIAL_INTERVAL:300ms}
         multiplier: ${OLLAMA_RETRY_BACKOFF_MULTIPLIER:2}
-        max-interval: ${OLLAMA_RETRY_MAX_INTERVAL:5s}
+        max-interval: ${OLLAMA_RETRY_MAX_INTERVAL:1s}
     ollama:
       init:
         timeout: ${OLLAMA_INIT_TIMEOUT:30s}
@@ -53,24 +54,29 @@ spring:
           model: ${OLLAMA_CHAT_MODEL:gpt-oss:120b-cloud}
           keep_alive: ${OLLAMA_CHAT_KEEP_ALIVE:30m}
           temperature: ${OLLAMA_CHAT_TEMPERATURE:0.1}
-          num-predict: ${OLLAMA_CHAT_NUM_PREDICT:800}
-          num-ctx: ${OLLAMA_CHAT_NUM_CTX:4096}
+          num-predict: ${OLLAMA_CHAT_NUM_PREDICT:320}
+          num-ctx: ${OLLAMA_CHAT_NUM_CTX:3072}
 
 app:
   ai:
     review:
       enabled: ${AI_REVIEW_ENABLED:true}
       fail-open: ${AI_REVIEW_FAIL_OPEN:true}
-      final-section-max-chars: ${AI_REVIEW_FINAL_SECTION_MAX_CHARS:1800}
+      final-section-max-chars: ${AI_REVIEW_FINAL_SECTION_MAX_CHARS:900}
     ollama:
       max-concurrent-calls: ${OLLAMA_MAX_CONCURRENT_CALLS:1}
-      acquire-timeout: ${OLLAMA_ACQUIRE_TIMEOUT:20s}
-      prompt-max-chars: ${OLLAMA_PROMPT_MAX_CHARS:12000}
+      acquire-timeout: ${OLLAMA_ACQUIRE_TIMEOUT:8s}
+      prompt-max-chars: ${OLLAMA_PROMPT_MAX_CHARS:7000}
   webhook:
     executor:
       core-pool-size: ${WEBHOOK_EXECUTOR_CORE_POOL_SIZE:1}
       max-pool-size: ${WEBHOOK_EXECUTOR_MAX_POOL_SIZE:2}
       queue-capacity: ${WEBHOOK_EXECUTOR_QUEUE_CAPACITY:20}
+
+http:
+  client:
+    connect-timeout: ${HTTP_CLIENT_CONNECT_TIMEOUT:2s}
+    read-timeout: ${HTTP_CLIENT_READ_TIMEOUT:8s}
 
 
 # 日志配置（便于调试流程）

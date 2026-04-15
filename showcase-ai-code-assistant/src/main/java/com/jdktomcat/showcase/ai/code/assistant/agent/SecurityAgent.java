@@ -23,16 +23,18 @@ public class SecurityAgent implements NodeAction<CommitTaskState> {
      */
     public void review(CommitTaskState state) {
         String prompt = String.format("""
-                你是安全审计专家，请依据 OWASP Top 10 和常见服务端安全问题审查以下代码改动。
-                请用中文并按以下 Markdown 结构输出：
+                你是安全审计专家。基于 OWASP Top 10 和服务端常见漏洞审查以下 Diff。
+                重点关注：注入、鉴权与越权、敏感信息、反序列化、文件与资源访问控制。
+                仅用中文，严格按以下 Markdown 输出：
+                总字数尽量控制在 220 字内。
                 ## 结论
                 风险等级：低风险 / 中风险 / 高风险
                 
                 ## 发现
-                - 最多 3 条，重点关注注入、鉴权、敏感信息泄露、越权、反序列化、资源泄露
+                - 最多 3 条
                 
                 ## 建议
-                - 最多 3 条；如果没有明显问题，明确写“未发现阻断发布的安全风险”
+                - 最多 3 条；无阻断风险时写“未发现阻断发布的安全风险”
                 
                 提交上下文：
                 - 仓库：%s
