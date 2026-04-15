@@ -82,8 +82,7 @@ public class BusinessAgent implements NodeAction<CommitTaskState> {
                         - 可先依据影响入口点和代码影响面评估报告做人工复核，模型恢复后重新审查
                         """
         );
-//        log.info("业务完整审查完成，报告长度 {} 字", review.length());
-        log.info("业务完整审查完成，报告： {} ", review);
+        log.info("业务完整审查完成，报告长度 {} 字", review.length());
         state.setBusinessReport(review);
     }
 

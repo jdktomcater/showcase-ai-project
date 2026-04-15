@@ -152,9 +152,9 @@ public class CodeIndexController {
 
     @PostMapping("/api/code/graph/view")
     public GraphViewResponse graphView(@Valid @RequestBody GraphViewRequest request) {
-        log.debug("收到图视图请求 mode={} nodeType={} fqn={} depth={}", 
-                request.resolvedMode(), request.nodeType(), request.requiredFqn(), request.resolvedDepth());
         try {
+            log.debug("收到图视图请求 mode={} nodeType={} fqn={} methodFqn={} depth={}",
+                    request.resolvedMode(), request.nodeType(), request.fqn(), request.methodFqn(), request.resolvedDepth());
             GraphViewResponse response = switch (request.resolvedMode()) {
                 case "impact" -> impactAnalysisService.impactGraph(request.requiredMethodFqn(), request.resolvedDepth());
                 case "dependencies" -> impactAnalysisService.dependencyGraph(
