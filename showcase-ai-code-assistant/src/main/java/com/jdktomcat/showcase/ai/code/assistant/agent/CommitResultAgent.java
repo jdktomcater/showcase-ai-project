@@ -94,18 +94,18 @@ public class CommitResultAgent implements NodeAction<CommitTaskState> {
                 compactPerformanceReport,
                 compactSecurityReport
         );
-        String validationResult = reviewChatService.callOrFallback(
-                "final-decision",
-                prompt,
-                () -> """
-                        {
-                          "decision": "PASS",
-                          "summary": "AI 模型当前不可用，已返回降级评审结果，请结合专项报告人工复核",
-                          "finalReport": "## 总体结论\\nPASS\\n\\n## 关键风险\\n- AI 模型当前不可用，最终结论基于降级逻辑生成。\\n- 业务、性能、安全专项报告可能为兜底内容，需要人工复核。\\n\\n## 建议动作\\n- 检查 OLLAMA_BASE_URL、OLLAMA_CHAT_MODEL 或切换到可用云模型后重新执行评审。\\n- 在模型恢复前，将本次评审视为非阻断参考结果。",
-                          "telegramMessage": "结论: PASS\\n原因: AI 模型当前不可用，已返回降级评审结果，请人工复核。"
-                        }
-                        """
-        );
+        String validationResult = reviewChatService.callOrFallback("final-decision", prompt, () -> "");
+        if (isBlankResponse(validationResult)) {
+            log.warn("final-decision 返回空响应，尝试紧凑提示词重试");
+            validationResult = reviewChatService.callOrFallback(
+                    "final-decision-compact",
+                    buildCompactDecisionPrompt(state),
+                    this::fallbackDecisionJson
+            );
+        }
+        if (isBlankResponse(validationResult)) {
+            validationResult = fallbackDecisionJson();
+        }
         log.info("提交裁决原始结果：{}", validationResult);
         Map<String, Object> result;
         try {
@@ -161,22 +161,77 @@ public class CommitResultAgent implements NodeAction<CommitTaskState> {
     }
 
     private String compactForPrompt(String content) {
+        return compactForPrompt(content, Math.max(400, finalSectionMaxChars));
+    }
+
+    private String compactForPrompt(String content, int maxChars) {
         if (content == null || content.isBlank()) {
             return "-";
         }
         String normalized = content.trim();
-        int safeMaxChars = Math.max(400, finalSectionMaxChars);
+        int safeMaxChars = Math.max(120, maxChars);
         if (normalized.length() <= safeMaxChars) {
             return normalized;
         }
-        int headLength = Math.max(200, safeMaxChars * 2 / 3);
-        int tailLength = Math.max(80, safeMaxChars - headLength);
+        int headLength = Math.max(60, safeMaxChars * 2 / 3);
+        int tailLength = Math.max(30, safeMaxChars - headLength);
         if (headLength + tailLength >= normalized.length()) {
             return normalized.substring(0, safeMaxChars);
         }
         return normalized.substring(0, headLength)
                 + "\n...[内容截断，减少模型超时风险]...\n"
                 + normalized.substring(normalized.length() - tailLength);
+    }
+
+    private String buildCompactDecisionPrompt(CommitTaskState state) {
+        return String.format("""
+                你是提交评审裁决专家，请根据专项审查摘要输出最终 JSON。
+                仅输出合法 JSON，不要 Markdown 代码块。
+                decision 只能是 "PASS" 或 "FAIL"。
+                判定：出现高风险安全、关键业务链路受损、显著性能风险或严重规范问题则 FAIL，否则 PASS。
+                JSON 字段：
+                {"decision":"PASS/FAIL","summary":"<=50字","finalReport":"包含 ## 总体结论/## 关键风险/## 建议动作","telegramMessage":"<=120字"}
+                
+                上下文：
+                - 仓库：%s
+                - 分支：%s
+                - 提交：%s
+                - 文件：%s，新增：%s，删除：%s
+                
+                专项审查摘要：
+                - Business: %s
+                - Convention: %s
+                - Performance: %s
+                - Security: %s
+                - Impact: %s
+                """,
+                state.getRepository(),
+                state.getBranch(),
+                state.getSha(),
+                Objects.toString(state.getChangedFiles(), "0"),
+                Objects.toString(state.getAdditions(), "0"),
+                Objects.toString(state.getDeletions(), "0"),
+                compactForPrompt(state.getBusinessReport(), 260),
+                compactForPrompt(state.getConventionReport(), 220),
+                compactForPrompt(state.getPerformanceReport(), 220),
+                compactForPrompt(state.getSecurityReport(), 220),
+                compactForPrompt(state.getCodeImpactSummary(), 260)
+        );
+    }
+
+    private boolean isBlankResponse(String value) {
+        return value == null || value.isBlank();
+    }
+
+    private String fallbackDecisionJson() {
+        return """
+                {
+                  "decision": "PASS",
+                  "summary": "AI 模型当前不可用，已返回降级评审结果，请结合专项报告人工复核",
+                  "finalReport": "## 总体结论\\nPASS\\n\\n## 关键风险\\n- AI 模型当前不可用，最终结论基于降级逻辑生成。\\n- 业务、性能、安全专项报告可能为兜底内容，需要人工复核。\\n\\n## 建议动作\\n- 检查 OLLAMA_BASE_URL、OLLAMA_CHAT_MODEL 或切换到可用云模型后重新执行评审。\\n- 在模型恢复前，将本次评审视为非阻断参考结果。",
+                  "telegramMessage": "结论: PASS\\n原因: AI 模型当前不可用，已返回降级评审结果，请人工复核。"
+                }
+                """;
     }
 
     private String formatAffectedEntryPoints(List<AffectedEntryPoint> affectedEntryPoints) {
