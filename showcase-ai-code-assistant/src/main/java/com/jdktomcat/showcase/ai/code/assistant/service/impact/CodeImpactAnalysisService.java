@@ -12,8 +12,15 @@ import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.ArrayDeque;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -21,8 +28,10 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Stream;
 
 @Slf4j
 @Service
@@ -30,6 +39,10 @@ import java.util.regex.Pattern;
 public class CodeImpactAnalysisService {
 
     private static final Pattern DIFF_HUNK_PATTERN = Pattern.compile("@@ -\\d+(?:,\\d+)? \\+(\\d+)(?:,(\\d+))? @@");
+    private static final List<String> FINGERPRINT_EXCLUDED_SEGMENTS = List.of(
+            ".git", ".idea", ".settings", ".vscode",
+            "target", "build", "node_modules", "dist"
+    );
 
     private final RestTemplate restTemplate;
 
@@ -48,10 +61,21 @@ public class CodeImpactAnalysisService {
     @Value("${code-chunk.impact.max-items-per-type:3}")
     private int maxItemsPerType;
 
+    @Value("${code-chunk.impact.repo-root:}")
+    private String impactRepoRoot;
+
+    private final Object dependencyGraphRefreshLock = new Object();
+    private final Map<String, String> dependencyGraphFingerprintByRepo = new ConcurrentHashMap<>();
+
     /**
      * 构建依赖图影响面摘要（使用代码依赖图 API）
      */
     public String buildGraphImpactSummary(String repository, CompareResponse compareResponse) {
+        ensureFreshDependencyGraph(repository, compareResponse);
+        return doBuildGraphImpactSummary(repository, compareResponse);
+    }
+
+    private String doBuildGraphImpactSummary(String repository, CompareResponse compareResponse) {
         log.debug("开始构建依赖图影响面摘要 repository={}", repository);
         if (!impactEnabled) {
             log.info("依赖图影响面分析未启用 repository={}", repository);
@@ -108,6 +132,7 @@ public class CodeImpactAnalysisService {
      * 构建影响链路摘要（使用 Impact Chain API）
      */
     public String buildImpactChainSummary(String repository, CompareResponse compareResponse) {
+        ensureFreshDependencyGraph(repository, compareResponse);
         return analyzeImpactChain(repository, compareResponse).summary();
     }
 
@@ -120,6 +145,7 @@ public class CodeImpactAnalysisService {
 
     public ImpactAnalysisResult analyzeImpact(String repository, CompareResponse compareResponse) {
         log.info("开始构建完整影响面评估报告 repository={}", repository);
+        ensureFreshDependencyGraph(repository, compareResponse);
         ImpactChainAnalysis impactChainAnalysis = analyzeImpactChain(repository, compareResponse);
         StringBuilder report = new StringBuilder();
         report.append("# 代码变更影响面评估报告\n\n");
@@ -129,7 +155,7 @@ public class CodeImpactAnalysisService {
 
         // 1. 代码依赖图影响面
         log.debug("构建代码依赖图影响面 repository={}", repository);
-        report.append(buildGraphImpactSummary(repository, compareResponse));
+        report.append(doBuildGraphImpactSummary(repository, compareResponse));
         report.append("\n\n---\n\n");
 
         // 2. 业务影响链路
@@ -138,6 +164,192 @@ public class CodeImpactAnalysisService {
 
         log.info("完整影响面评估报告构建完成 repository={} report 长度={}", repository, report.length());
         return new ImpactAnalysisResult(report.toString(), impactChainAnalysis.affectedEntryPoints());
+    }
+
+    private void ensureFreshDependencyGraph(String repository, CompareResponse compareResponse) {
+        if (!impactEnabled) {
+            return;
+        }
+        if (compareResponse == null || compareResponse.getFiles() == null || compareResponse.getFiles().isEmpty()) {
+            return;
+        }
+        boolean hasJavaChanges = compareResponse.getFiles().stream()
+                .map(CompareResponse.FileDiff::getFilename)
+                .filter(Objects::nonNull)
+                .anyMatch(filename -> filename.endsWith(".java"));
+        if (!hasJavaChanges) {
+            return;
+        }
+        String repoKey = normalizeRepositoryKey(repository);
+        String currentFingerprint = buildDependencyGraphFingerprint(repository, compareResponse.getFiles());
+        synchronized (dependencyGraphRefreshLock) {
+            String previousFingerprint = dependencyGraphFingerprintByRepo.get(repoKey);
+            if (Objects.equals(previousFingerprint, currentFingerprint)) {
+                log.debug("依赖图状态未变化，跳过重建 repository={} fingerprint={}", repository, currentFingerprint);
+                return;
+            }
+            try {
+                IndexGraphResponse response = postForObject("/api/code/graph/index", Map.of(), IndexGraphResponse.class);
+                log.info("依赖图已重建 repository={} files={} nodes={} relations={} skipped={} fingerprint={}",
+                        repository, response.getFiles(), response.getNodes(), response.getRelations(), response.getSkippedFiles(),
+                        currentFingerprint);
+                dependencyGraphFingerprintByRepo.put(repoKey, currentFingerprint);
+            } catch (Exception ex) {
+                log.error("触发依赖图重建失败 repository={} url={}", repository, codeChunkBaseUrl, ex);
+                throw new IllegalStateException("触发依赖图重建失败：" + ex.getMessage(), ex);
+            }
+        }
+    }
+
+    private String buildDependencyGraphFingerprint(String repository, List<CompareResponse.FileDiff> files) {
+        Optional<Path> repoRoot = resolveRepositoryRoot(repository);
+        if (repoRoot.isPresent()) {
+            try {
+                String fingerprint = buildJavaFileStatsFingerprint(repoRoot.get());
+                log.debug("基于仓库文件状态生成依赖图指纹 repository={} repoRoot={} fingerprint={}",
+                        repository, repoRoot.get(), fingerprint);
+                return fingerprint;
+            } catch (IOException ex) {
+                log.warn("生成仓库文件状态指纹失败，降级使用 diff 指纹 repository={} repoRoot={}",
+                        repository, repoRoot.get(), ex);
+            }
+        }
+        String fallbackFingerprint = buildDiffFallbackFingerprint(files);
+        log.debug("基于 diff 生成依赖图指纹 repository={} fingerprint={}", repository, fallbackFingerprint);
+        return fallbackFingerprint;
+    }
+
+    private Optional<Path> resolveRepositoryRoot(String repository) {
+        if (impactRepoRoot != null && !impactRepoRoot.isBlank()) {
+            Path configured = Path.of(impactRepoRoot).toAbsolutePath().normalize();
+            if (Files.isDirectory(configured)) {
+                return Optional.of(configured);
+            }
+            log.warn("配置的 code-chunk.impact.repo-root 不存在或不可访问 path={}", configured);
+        }
+
+        String repositoryName = extractRepositoryName(repository);
+        if (repositoryName.isBlank()) {
+            return Optional.empty();
+        }
+
+        Path cwd = Path.of(System.getProperty("user.dir", ".")).toAbsolutePath().normalize();
+        List<Path> candidates = new ArrayList<>();
+        candidates.add(cwd);
+        candidates.add(cwd.resolve(repositoryName));
+        if (cwd.getParent() != null) {
+            candidates.add(cwd.getParent().resolve(repositoryName));
+            if (cwd.getParent().getParent() != null) {
+                candidates.add(cwd.getParent().getParent().resolve(repositoryName));
+            }
+        }
+
+        for (Path candidate : candidates) {
+            if (Files.isDirectory(candidate) && candidate.getFileName() != null
+                    && repositoryName.equals(candidate.getFileName().toString())) {
+                return Optional.of(candidate);
+            }
+        }
+        for (Path candidate : candidates) {
+            if (Files.isDirectory(candidate.resolve(repositoryName))) {
+                return Optional.of(candidate.resolve(repositoryName));
+            }
+        }
+        return Optional.empty();
+    }
+
+    private String buildJavaFileStatsFingerprint(Path repoRoot) throws IOException {
+        MessageDigest digest = newSha256Digest();
+        updateDigest(digest, "root=" + repoRoot.toString());
+
+        List<Path> javaFiles;
+        try (Stream<Path> stream = Files.walk(repoRoot)) {
+            javaFiles = stream
+                    .filter(Files::isRegularFile)
+                    .filter(this::isFingerprintJavaFile)
+                    .sorted(Comparator.comparing(path -> repoRoot.relativize(path).toString()))
+                    .toList();
+        }
+
+        for (Path file : javaFiles) {
+            Path relativePath = repoRoot.relativize(file);
+            String normalizedPath = relativePath.toString().replace('\\', '/');
+            updateDigest(digest, normalizedPath);
+            updateDigest(digest, String.valueOf(Files.size(file)));
+            updateDigest(digest, String.valueOf(Files.getLastModifiedTime(file).toMillis()));
+        }
+        updateDigest(digest, "javaFileCount=" + javaFiles.size());
+        return toHex(digest.digest());
+    }
+
+    private boolean isFingerprintJavaFile(Path path) {
+        String fileName = path.getFileName() == null ? "" : path.getFileName().toString();
+        if (!fileName.endsWith(".java")) {
+            return false;
+        }
+        String normalizedPath = path.toString().replace('\\', '/');
+        return FINGERPRINT_EXCLUDED_SEGMENTS.stream()
+                .noneMatch(segment -> normalizedPath.contains("/" + segment + "/"));
+    }
+
+    private String buildDiffFallbackFingerprint(List<CompareResponse.FileDiff> files) {
+        MessageDigest digest = newSha256Digest();
+        if (files == null || files.isEmpty()) {
+            updateDigest(digest, "NO_DIFF_FILES");
+            return toHex(digest.digest());
+        }
+
+        files.stream()
+                .filter(Objects::nonNull)
+                .filter(file -> file.getFilename() != null && file.getFilename().endsWith(".java"))
+                .sorted(Comparator.comparing(CompareResponse.FileDiff::getFilename))
+                .forEach(file -> {
+                    updateDigest(digest, "file=" + file.getFilename());
+                    updateDigest(digest, "status=" + Objects.toString(file.getStatus(), ""));
+                    updateDigest(digest, "additions=" + Objects.toString(file.getAdditions(), ""));
+                    updateDigest(digest, "deletions=" + Objects.toString(file.getDeletions(), ""));
+                    updateDigest(digest, "changes=" + Objects.toString(file.getChanges(), ""));
+                    updateDigest(digest, "patchHash=" + Integer.toHexString(Objects.hashCode(file.getPatch())));
+                });
+        return toHex(digest.digest());
+    }
+
+    private String normalizeRepositoryKey(String repository) {
+        if (repository == null || repository.isBlank()) {
+            return "unknown";
+        }
+        return repository.trim().toLowerCase();
+    }
+
+    private String extractRepositoryName(String repository) {
+        if (repository == null || repository.isBlank()) {
+            return "";
+        }
+        String normalized = repository.trim();
+        int slash = normalized.lastIndexOf('/');
+        return slash >= 0 ? normalized.substring(slash + 1) : normalized;
+    }
+
+    private MessageDigest newSha256Digest() {
+        try {
+            return MessageDigest.getInstance("SHA-256");
+        } catch (NoSuchAlgorithmException ex) {
+            throw new IllegalStateException("SHA-256 algorithm is not available", ex);
+        }
+    }
+
+    private void updateDigest(MessageDigest digest, String value) {
+        digest.update(value.getBytes(StandardCharsets.UTF_8));
+        digest.update((byte) '\n');
+    }
+
+    private String toHex(byte[] bytes) {
+        StringBuilder builder = new StringBuilder(bytes.length * 2);
+        for (byte b : bytes) {
+            builder.append(Character.forDigit((b >>> 4) & 0xF, 16));
+            builder.append(Character.forDigit(b & 0xF, 16));
+        }
+        return builder.toString();
     }
 
     private ImpactChainAnalysis analyzeImpactChain(String repository, CompareResponse compareResponse) {
@@ -1126,6 +1338,15 @@ public class CodeImpactAnalysisService {
     public static class AnalysisResponse {
         private boolean success;
         private String message;
+    }
+
+    @Data
+    public static class IndexGraphResponse {
+        private boolean success;
+        private Integer files;
+        private Integer nodes;
+        private Integer relations;
+        private Integer skippedFiles;
     }
 
     @Data

@@ -10,7 +10,6 @@ import spoon.support.compiler.VirtualFile;
 
 import java.io.File;
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -112,12 +111,7 @@ final class SpoonAstSupport {
     }
 
     static String extractJavadocText(CtElement declaration) {
-        return declaration.getComments().stream()
-                .filter(c -> c.getCommentType() == CtComment.CommentType.JAVADOC)
-                .map(CtComment::getContent)
-                .findFirst()
-                .map(String::trim)
-                .orElse("");
+        return declaration.getComments().stream().filter(c -> c.getCommentType() == CtComment.CommentType.JAVADOC).map(CtComment::getContent).findFirst().map(String::trim).orElse("");
     }
 
     static List<CtAnnotation<?>> annotations(CtElement declaration) {

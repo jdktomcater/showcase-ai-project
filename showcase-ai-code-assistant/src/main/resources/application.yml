@@ -17,6 +17,7 @@ code-chunk:
     max-types: ${CODE_CHUNK_IMPACT_MAX_TYPES:3}
     max-items-per-type: ${CODE_CHUNK_IMPACT_MAX_ITEMS_PER_TYPE:3}
     max-files-for-analysis: ${CODE_CHUNK_IMPACT_MAX_FILES_FOR_ANALYSIS:20}
+    repo-root: ${CODE_CHUNK_IMPACT_REPO_ROOT:}
 
 telegram:
   bot:
