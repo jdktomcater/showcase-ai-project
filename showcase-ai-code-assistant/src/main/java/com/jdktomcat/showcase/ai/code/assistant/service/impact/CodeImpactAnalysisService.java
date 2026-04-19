@@ -68,14 +68,6 @@ public class CodeImpactAnalysisService {
     private final Map<String, String> dependencyGraphFingerprintByRepo = new ConcurrentHashMap<>();
 
     /**
-     * 构建依赖图影响面摘要（使用代码依赖图 API）
-     */
-    public String buildGraphImpactSummary(String repository, CompareResponse compareResponse) {
-        refreshDependencyGraph(repository, compareResponse, false);
-        return doBuildGraphImpactSummary(repository, compareResponse);
-    }
-
-    /**
      * 在评审前强制重建依赖图，确保后续审查使用最新图数据。
      */
     public void rebuildDependencyGraphBeforeReview(String repository, CompareResponse compareResponse) {
@@ -133,21 +125,6 @@ public class CodeImpactAnalysisService {
         }
         log.debug("依赖图影响面摘要构建完成 repository={} hasData={}", repository, hasData);
         return summary.toString();
-    }
-
-    /**
-     * 构建影响链路摘要（使用 Impact Chain API）
-     */
-    public String buildImpactChainSummary(String repository, CompareResponse compareResponse) {
-        refreshDependencyGraph(repository, compareResponse, false);
-        return analyzeImpactChain(repository, compareResponse).summary();
-    }
-
-    /**
-     * 构建完整的影响面评估报告（结合依赖图和影响链路）
-     */
-    public String buildFullImpactSummary(String repository, CompareResponse compareResponse) {
-        return analyzeImpact(repository, compareResponse).summary();
     }
 
     public ImpactAnalysisResult analyzeImpact(String repository, CompareResponse compareResponse) {
