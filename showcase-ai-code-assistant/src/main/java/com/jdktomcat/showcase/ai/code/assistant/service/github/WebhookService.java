@@ -1,11 +1,9 @@
 package com.jdktomcat.showcase.ai.code.assistant.service.github;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.jdktomcat.showcase.ai.code.assistant.domain.dto.CommitTaskState;
 import com.jdktomcat.showcase.ai.code.assistant.domain.entity.CompareResponse;
 import com.jdktomcat.showcase.ai.code.assistant.domain.entity.PushPayload;
 import com.jdktomcat.showcase.ai.code.assistant.service.impact.CodeImpactAnalysisService;
-import com.jdktomcat.showcase.ai.code.assistant.service.telegram.TelegramNotificationService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -24,9 +22,8 @@ public class WebhookService {
 
     private final ObjectMapper objectMapper;
     private final GitHubCompareClient gitHubCompareClient;
-    private final CommitReviewService commitReviewService;
     private final CodeImpactAnalysisService codeImpactAnalysisService;
-    private final TelegramNotificationService telegramNotificationService;
+    private final WebhookReviewAsyncService webhookReviewAsyncService;
 
     @Value("${github.webhook.secret}")
     private String webhookSecret;
@@ -58,12 +55,9 @@ public class WebhookService {
             log.debug("开始重建依赖图 repository={}", fullName);
             codeImpactAnalysisService.rebuildDependencyGraphBeforeReview(fullName, compareResponse);
             log.info("依赖图重建完成 repository={}", fullName);
-            log.debug("开始执行提交评审 repository={}", fullName);
-            CommitTaskState finalState = commitReviewService.reviewPush(pushPayload, compareResponse);
-            log.info("提交评审完成 repository={} branch={} decision={} passed={}", fullName, pushPayload.getRef(), finalState.getDecision(), finalState.isPassed());
-            log.debug("开始发送 Telegram 通知 repository={}", fullName);
-            telegramNotificationService.sendCommitReview(finalState);
-            log.info("GitHub push 处理完成 repository={} branch={} decision={}", fullName, pushPayload.getRef(), finalState.getDecision());
+            log.debug("开始异步投递代码分析任务 repository={}", fullName);
+            webhookReviewAsyncService.reviewAndNotify(pushPayload, compareResponse);
+            log.info("GitHub push 处理已进入异步审查阶段 repository={} branch={}", fullName, pushPayload.getRef());
         } catch (Exception e) {
             log.error("GitHub push 处理失败", e);
         }

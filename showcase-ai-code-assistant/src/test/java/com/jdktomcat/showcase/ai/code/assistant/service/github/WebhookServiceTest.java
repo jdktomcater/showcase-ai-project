@@ -1,10 +1,8 @@
 package com.jdktomcat.showcase.ai.code.assistant.service.github;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.jdktomcat.showcase.ai.code.assistant.domain.dto.CommitTaskState;
 import com.jdktomcat.showcase.ai.code.assistant.domain.entity.CompareResponse;
 import com.jdktomcat.showcase.ai.code.assistant.service.impact.CodeImpactAnalysisService;
-import com.jdktomcat.showcase.ai.code.assistant.service.telegram.TelegramNotificationService;
 import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
 
@@ -22,24 +20,18 @@ class WebhookServiceTest {
     @Test
     void shouldRebuildDependencyGraphBeforeReviewOnPushEvent() {
         GitHubCompareClient gitHubCompareClient = mock(GitHubCompareClient.class);
-        CommitReviewService commitReviewService = mock(CommitReviewService.class);
         CodeImpactAnalysisService codeImpactAnalysisService = mock(CodeImpactAnalysisService.class);
-        TelegramNotificationService telegramNotificationService = mock(TelegramNotificationService.class);
+        WebhookReviewAsyncService webhookReviewAsyncService = mock(WebhookReviewAsyncService.class);
         WebhookService webhookService = new WebhookService(
                 new ObjectMapper(),
                 gitHubCompareClient,
-                commitReviewService,
                 codeImpactAnalysisService,
-                telegramNotificationService
+                webhookReviewAsyncService
         );
 
         CompareResponse compareResponse = new CompareResponse();
-        CommitTaskState finalState = new CommitTaskState();
-        finalState.setDecision("PASS");
         when(gitHubCompareClient.fetchCompare(eq("jdktomcater/showcase-pay"), eq("before-sha"), eq("after-sha")))
                 .thenReturn(compareResponse);
-        when(commitReviewService.reviewPush(any(), eq(compareResponse)))
-                .thenReturn(finalState);
 
         webhookService.handlePushEvent("""
                 {
@@ -53,25 +45,22 @@ class WebhookServiceTest {
                 }
                 """);
 
-        InOrder inOrder = inOrder(gitHubCompareClient, codeImpactAnalysisService, commitReviewService, telegramNotificationService);
+        InOrder inOrder = inOrder(gitHubCompareClient, codeImpactAnalysisService, webhookReviewAsyncService);
         inOrder.verify(gitHubCompareClient).fetchCompare("jdktomcater/showcase-pay", "before-sha", "after-sha");
         inOrder.verify(codeImpactAnalysisService).rebuildDependencyGraphBeforeReview("jdktomcater/showcase-pay", compareResponse);
-        inOrder.verify(commitReviewService).reviewPush(any(), eq(compareResponse));
-        inOrder.verify(telegramNotificationService).sendCommitReview(finalState);
+        inOrder.verify(webhookReviewAsyncService).reviewAndNotify(any(), eq(compareResponse));
     }
 
     @Test
     void shouldSkipReviewWhenDependencyGraphRebuildFails() {
         GitHubCompareClient gitHubCompareClient = mock(GitHubCompareClient.class);
-        CommitReviewService commitReviewService = mock(CommitReviewService.class);
         CodeImpactAnalysisService codeImpactAnalysisService = mock(CodeImpactAnalysisService.class);
-        TelegramNotificationService telegramNotificationService = mock(TelegramNotificationService.class);
+        WebhookReviewAsyncService webhookReviewAsyncService = mock(WebhookReviewAsyncService.class);
         WebhookService webhookService = new WebhookService(
                 new ObjectMapper(),
                 gitHubCompareClient,
-                commitReviewService,
                 codeImpactAnalysisService,
-                telegramNotificationService
+                webhookReviewAsyncService
         );
 
         CompareResponse compareResponse = new CompareResponse();
@@ -93,7 +82,6 @@ class WebhookServiceTest {
                 }
                 """);
 
-        verify(commitReviewService, never()).reviewPush(any(), any());
-        verify(telegramNotificationService, never()).sendCommitReview(any());
+        verify(webhookReviewAsyncService, never()).reviewAndNotify(any(), any());
     }
 }
