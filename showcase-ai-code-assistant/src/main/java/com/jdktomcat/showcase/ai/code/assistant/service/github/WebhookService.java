@@ -8,8 +8,6 @@ import com.jdktomcat.showcase.ai.code.assistant.service.telegram.TelegramNotific
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.MediaType;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
@@ -31,9 +29,6 @@ public class WebhookService {
     @Value("${github.webhook.secret}")
     private String webhookSecret;
 
-    @Value("${github.api.token}")
-    private String githubToken;
-
     public boolean verifySignature(String payload, String signatureHeader) {
         log.debug("验证 Webhook 签名 signatureHeader={}", signatureHeader);
         if (signatureHeader == null || signatureHeader.isBlank()) {
@@ -54,23 +49,16 @@ public class WebhookService {
             String fullName = pushPayload.getRepository().getFullName();
             String before = pushPayload.getBefore();
             String after = pushPayload.getAfter();
-            log.info("解析 Push Payload 成功 repository={} branch={} before={} after={}", 
-                    fullName, pushPayload.getRef(), before, after);
-            
+            log.info("解析 Push Payload 成功 repository={} branch={} before={} after={}", fullName, pushPayload.getRef(), before, after);
             log.debug("开始获取 Compare 数据 repository={} before={} after={}", fullName, before, after);
             CompareResponse compareResponse = gitHubCompareClient.fetchCompare(fullName, before, after);
-            log.info("Compare 数据获取完成 repository={} files={}", 
-                    fullName, compareResponse != null && compareResponse.getFiles() != null ? compareResponse.getFiles().size() : 0);
-            
+            log.info("Compare 数据获取完成 repository={} files={}", fullName, compareResponse != null && compareResponse.getFiles() != null ? compareResponse.getFiles().size() : 0);
             log.debug("开始执行提交评审 repository={}", fullName);
             CommitTaskState finalState = commitReviewService.reviewPush(pushPayload, compareResponse);
-            log.info("提交评审完成 repository={} branch={} decision={} passed={}",
-                    fullName, pushPayload.getRef(), finalState.getDecision(), finalState.isPassed());
-            
+            log.info("提交评审完成 repository={} branch={} decision={} passed={}", fullName, pushPayload.getRef(), finalState.getDecision(), finalState.isPassed());
             log.debug("开始发送 Telegram 通知 repository={}", fullName);
             telegramNotificationService.sendCommitReview(finalState);
-            log.info("GitHub push 处理完成 repository={} branch={} decision={}",
-                    fullName, pushPayload.getRef(), finalState.getDecision());
+            log.info("GitHub push 处理完成 repository={} branch={} decision={}", fullName, pushPayload.getRef(), finalState.getDecision());
         } catch (Exception e) {
             log.error("GitHub push 处理失败", e);
         }
@@ -81,7 +69,6 @@ public class WebhookService {
             Mac mac = Mac.getInstance("HmacSHA256");
             SecretKeySpec secretKeySpec = new SecretKeySpec(secret.getBytes(StandardCharsets.UTF_8), "HmacSHA256");
             mac.init(secretKeySpec);
-
             byte[] hash = mac.doFinal(data.getBytes(StandardCharsets.UTF_8));
             return bytesToHex(hash);
         } catch (Exception e) {
