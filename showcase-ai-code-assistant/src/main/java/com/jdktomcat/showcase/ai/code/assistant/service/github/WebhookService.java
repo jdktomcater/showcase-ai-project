@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.jdktomcat.showcase.ai.code.assistant.domain.dto.CommitTaskState;
 import com.jdktomcat.showcase.ai.code.assistant.domain.entity.CompareResponse;
 import com.jdktomcat.showcase.ai.code.assistant.domain.entity.PushPayload;
+import com.jdktomcat.showcase.ai.code.assistant.service.impact.CodeImpactAnalysisService;
 import com.jdktomcat.showcase.ai.code.assistant.service.telegram.TelegramNotificationService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -24,6 +25,7 @@ public class WebhookService {
     private final ObjectMapper objectMapper;
     private final GitHubCompareClient gitHubCompareClient;
     private final CommitReviewService commitReviewService;
+    private final CodeImpactAnalysisService codeImpactAnalysisService;
     private final TelegramNotificationService telegramNotificationService;
 
     @Value("${github.webhook.secret}")
@@ -53,6 +55,9 @@ public class WebhookService {
             log.debug("开始获取 Compare 数据 repository={} before={} after={}", fullName, before, after);
             CompareResponse compareResponse = gitHubCompareClient.fetchCompare(fullName, before, after);
             log.info("Compare 数据获取完成 repository={} files={}", fullName, compareResponse != null && compareResponse.getFiles() != null ? compareResponse.getFiles().size() : 0);
+            log.debug("开始重建依赖图 repository={}", fullName);
+            codeImpactAnalysisService.rebuildDependencyGraphBeforeReview(fullName, compareResponse);
+            log.info("依赖图重建完成 repository={}", fullName);
             log.debug("开始执行提交评审 repository={}", fullName);
             CommitTaskState finalState = commitReviewService.reviewPush(pushPayload, compareResponse);
             log.info("提交评审完成 repository={} branch={} decision={} passed={}", fullName, pushPayload.getRef(), finalState.getDecision(), finalState.isPassed());

@@ -71,8 +71,15 @@ public class CodeImpactAnalysisService {
      * 构建依赖图影响面摘要（使用代码依赖图 API）
      */
     public String buildGraphImpactSummary(String repository, CompareResponse compareResponse) {
-        ensureFreshDependencyGraph(repository, compareResponse);
+        refreshDependencyGraph(repository, compareResponse, false);
         return doBuildGraphImpactSummary(repository, compareResponse);
+    }
+
+    /**
+     * 在评审前强制重建依赖图，确保后续审查使用最新图数据。
+     */
+    public void rebuildDependencyGraphBeforeReview(String repository, CompareResponse compareResponse) {
+        refreshDependencyGraph(repository, compareResponse, true);
     }
 
     private String doBuildGraphImpactSummary(String repository, CompareResponse compareResponse) {
@@ -132,7 +139,7 @@ public class CodeImpactAnalysisService {
      * 构建影响链路摘要（使用 Impact Chain API）
      */
     public String buildImpactChainSummary(String repository, CompareResponse compareResponse) {
-        ensureFreshDependencyGraph(repository, compareResponse);
+        refreshDependencyGraph(repository, compareResponse, false);
         return analyzeImpactChain(repository, compareResponse).summary();
     }
 
@@ -145,7 +152,7 @@ public class CodeImpactAnalysisService {
 
     public ImpactAnalysisResult analyzeImpact(String repository, CompareResponse compareResponse) {
         log.info("开始构建完整影响面评估报告 repository={}", repository);
-        ensureFreshDependencyGraph(repository, compareResponse);
+        refreshDependencyGraph(repository, compareResponse, false);
         ImpactChainAnalysis impactChainAnalysis = analyzeImpactChain(repository, compareResponse);
         StringBuilder report = new StringBuilder();
         report.append("# 代码变更影响面评估报告\n\n");
@@ -166,35 +173,47 @@ public class CodeImpactAnalysisService {
         return new ImpactAnalysisResult(report.toString(), impactChainAnalysis.affectedEntryPoints());
     }
 
-    private void ensureFreshDependencyGraph(String repository, CompareResponse compareResponse) {
+    private void refreshDependencyGraph(String repository, CompareResponse compareResponse, boolean forceRebuild) {
         if (!impactEnabled) {
             return;
         }
         if (compareResponse == null || compareResponse.getFiles() == null || compareResponse.getFiles().isEmpty()) {
             return;
         }
-        boolean hasJavaChanges = compareResponse.getFiles().stream()
-                .map(CompareResponse.FileDiff::getFilename)
-                .filter(Objects::nonNull)
-                .anyMatch(filename -> filename.endsWith(".java"));
-        if (!hasJavaChanges) {
-            return;
+        if (!forceRebuild) {
+            boolean hasJavaChanges = compareResponse.getFiles().stream()
+                    .map(CompareResponse.FileDiff::getFilename)
+                    .filter(Objects::nonNull)
+                    .anyMatch(filename -> filename.endsWith(".java"));
+            if (!hasJavaChanges) {
+                return;
+            }
         }
         String repoKey = normalizeRepositoryKey(repository);
         String currentFingerprint = buildDependencyGraphFingerprint(repository, compareResponse.getFiles());
         synchronized (dependencyGraphRefreshLock) {
             String previousFingerprint = dependencyGraphFingerprintByRepo.get(repoKey);
-            if (Objects.equals(previousFingerprint, currentFingerprint)) {
+            if (!forceRebuild && Objects.equals(previousFingerprint, currentFingerprint)) {
                 log.debug("依赖图状态未变化，跳过重建 repository={} fingerprint={}", repository, currentFingerprint);
                 return;
             }
             try {
                 IndexGraphResponse response = postForObject("/api/code/graph/index", Map.of(), IndexGraphResponse.class);
-                log.info("依赖图已重建 repository={} files={} nodes={} relations={} skipped={} fingerprint={}",
-                        repository, response.getFiles(), response.getNodes(), response.getRelations(), response.getSkippedFiles(),
-                        currentFingerprint);
+                if (forceRebuild) {
+                    log.info("依赖图已强制重建 repository={} files={} nodes={} relations={} skipped={} fingerprint={}",
+                            repository, response.getFiles(), response.getNodes(), response.getRelations(), response.getSkippedFiles(),
+                            currentFingerprint);
+                } else {
+                    log.info("依赖图已重建 repository={} files={} nodes={} relations={} skipped={} fingerprint={}",
+                            repository, response.getFiles(), response.getNodes(), response.getRelations(), response.getSkippedFiles(),
+                            currentFingerprint);
+                }
                 dependencyGraphFingerprintByRepo.put(repoKey, currentFingerprint);
             } catch (Exception ex) {
+                if (forceRebuild) {
+                    log.error("评审前强制重建依赖图失败 repository={} url={}", repository, codeChunkBaseUrl, ex);
+                    throw new IllegalStateException("评审前强制重建依赖图失败：" + ex.getMessage(), ex);
+                }
                 log.error("触发依赖图重建失败 repository={} url={}", repository, codeChunkBaseUrl, ex);
                 throw new IllegalStateException("触发依赖图重建失败：" + ex.getMessage(), ex);
             }
