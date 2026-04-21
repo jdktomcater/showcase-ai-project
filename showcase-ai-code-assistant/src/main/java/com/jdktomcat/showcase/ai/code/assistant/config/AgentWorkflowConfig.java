@@ -25,9 +25,7 @@ public class AgentWorkflowConfig {
     @Bean
     public CompiledGraph<CommitTaskState> commitWorkflow(
             BusinessAgent businessAgent,
-            ConventionAgent conventionAgent,
-            PerformanceAgent performanceAgent,
-            SecurityAgent securityAgent,
+            QualityAgent qualityAgent,
             CommitResultAgent commitResultAgent,
             CommitRetryEdgeAction commitRetryEdgeAction,
             CommitTaskStateFactory stateFactory
@@ -38,20 +36,16 @@ public class AgentWorkflowConfig {
 
         // 2. 添加节点（每个智能体对应一个节点）
         graphBuilder.addNode("business", node_async(businessAgent));
-        graphBuilder.addNode("convention", node_async(conventionAgent));
-        graphBuilder.addNode("performance", node_async(performanceAgent));
-        graphBuilder.addNode("security", node_async(securityAgent));
+        graphBuilder.addNode("quality", node_async(qualityAgent));
         graphBuilder.addNode("result", node_async(commitResultAgent));
         graphBuilder.addNode("dispatchReview", node_async(CommitTaskState::toMap));
 
         // 3. 定义流程流转规则（边）
-        // 本地 Ollama 容易在并发大 prompt 下超时，因此四个维度串行执行。
+        // 本地 Ollama 容易在并发大 prompt 下超时，因此业务分析后由质量 Agent 串行完成三个专项审查。
         graphBuilder.addEdge(START, "dispatchReview");
         graphBuilder.addEdge("dispatchReview", "business");
-        graphBuilder.addEdge("business", "convention");
-        graphBuilder.addEdge("convention", "performance");
-        graphBuilder.addEdge("performance", "security");
-        graphBuilder.addEdge("security", "result");
+        graphBuilder.addEdge("business", "quality");
+        graphBuilder.addEdge("quality", "result");
 
         graphBuilder.addConditionalEdges("result",
                 AsyncEdgeAction.edge_async(commitRetryEdgeAction),
