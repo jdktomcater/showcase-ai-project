@@ -5,7 +5,9 @@ import com.jdktomcat.showcase.ai.code.assistant.dto.AffectedEntryPoint;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
@@ -45,6 +47,10 @@ public class CodeImpactAnalysisService {
     );
 
     private final RestTemplate restTemplate;
+
+    @Autowired(required = false)
+    @Qualifier("codeChunkGraphRestTemplate")
+    private RestTemplate graphIndexRestTemplate;
 
     @Value("${code-chunk.base-url:http://localhost:8081}")
     private String codeChunkBaseUrl;
@@ -1075,12 +1081,13 @@ public class CodeImpactAnalysisService {
     private <T> T postForObject(String path, Object request, Class<T> responseType) {
         String url = codeChunkBaseUrl + path;
         log.debug("HTTP POST 请求 url={}", url);
-        
+
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
-        
+
         try {
-            T response = restTemplate.postForObject(url, new HttpEntity<>(request, headers), responseType);
+            RestTemplate client = resolvePostClient(path);
+            T response = client.postForObject(url, new HttpEntity<>(request, headers), responseType);
             if (response == null) {
                 log.warn("依赖图服务返回空响应 path={}", path);
                 throw new IllegalStateException("依赖图服务返回空响应：" + path);
@@ -1093,10 +1100,17 @@ public class CodeImpactAnalysisService {
         }
     }
 
+    private RestTemplate resolvePostClient(String path) {
+        if ("/api/code/graph/index".equals(path) && graphIndexRestTemplate != null) {
+            return graphIndexRestTemplate;
+        }
+        return restTemplate;
+    }
+
     private <T> T getForObject(String path, Class<T> responseType) {
         String url = codeChunkBaseUrl + path;
         log.debug("HTTP GET 请求 url={}", url);
-        
+
         try {
             T response = restTemplate.getForObject(url, responseType);
             log.debug("HTTP GET 响应成功 path={}", path);

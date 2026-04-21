@@ -11,6 +11,8 @@ github:
 
 code-chunk:
   base-url: ${CODE_CHUNK_BASE_URL:http://localhost:8081}
+  graph-index:
+    read-timeout: ${CODE_CHUNK_GRAPH_INDEX_READ_TIMEOUT:180s}
   impact:
     enabled: ${CODE_CHUNK_IMPACT_ENABLED:true}
     depth: ${CODE_CHUNK_IMPACT_DEPTH:1}
