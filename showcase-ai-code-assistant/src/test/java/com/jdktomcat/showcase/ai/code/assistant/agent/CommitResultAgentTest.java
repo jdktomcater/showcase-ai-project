@@ -11,8 +11,11 @@ import org.springframework.test.util.ReflectionTestUtils;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class CommitResultAgentTest {
@@ -95,5 +98,45 @@ class CommitResultAgentTest {
         assertThat(state.getFinalReport()).contains("影响入口点（系统补充）");
         assertThat(state.getFinalReport()).contains("/api/order/create");
         assertThat(state.getTelegramMessage()).contains("/api/order/create");
+    }
+
+    @Test
+    void shouldUseCompactPromptFirstWhenFinalPromptTooLong() {
+        ChatModel chatModel = mock(ChatModel.class);
+        when(chatModel.call(anyString())).thenReturn("""
+                {
+                  "decision": "PASS",
+                  "summary": "风险可控",
+                  "finalReport": "## 总体结论\\nPASS\\n\\n## 关键风险\\n- 无阻断项\\n\\n## 建议动作\\n- 合并后观察",
+                  "telegramMessage": "结论: PASS"
+                }
+                """);
+
+        DefaultListableBeanFactory beanFactory = new DefaultListableBeanFactory();
+        beanFactory.registerSingleton("chatModel", chatModel);
+        ReviewChatService reviewChatService = new ReviewChatService(beanFactory.getBeanProvider(ChatModel.class));
+        ReflectionTestUtils.setField(reviewChatService, "aiReviewEnabled", true);
+        ReflectionTestUtils.setField(reviewChatService, "failOpen", true);
+
+        CommitResultAgent agent = new CommitResultAgent(reviewChatService);
+        ReflectionTestUtils.setField(agent, "finalPromptMaxChars", 1600);
+
+        CommitTaskState state = new CommitTaskState();
+        state.setRepository("jdktomcater/showcase-pay");
+        state.setBranch("main");
+        state.setSha("46d25588aeec5b7be3e6afc28be8af925e45c47e");
+        state.setChangedFiles(1);
+        state.setAdditions(1);
+        state.setDeletions(0);
+        state.setCodeImpactSummary("x".repeat(2500));
+        state.setBusinessReport("x".repeat(2500));
+        state.setConventionReport("x".repeat(2500));
+        state.setPerformanceReport("x".repeat(2500));
+        state.setSecurityReport("x".repeat(2500));
+
+        agent.validate(state);
+
+        verify(chatModel, times(1)).call(argThat((String prompt) -> prompt.contains("专项审查摘要")));
+        assertThat(state.getDecision()).isEqualTo("PASS");
     }
 }
