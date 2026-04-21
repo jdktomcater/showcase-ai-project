@@ -25,6 +25,9 @@ public class CommitResultAgent implements NodeAction<CommitTaskState> {
     @Value("${app.ai.review.final-section-max-chars:900}")
     private int finalSectionMaxChars;
 
+    @Value("${app.ai.review.final-prompt-max-chars:3200}")
+    private int finalPromptMaxChars;
+
     public CommitResultAgent(ReviewChatService reviewChatService) {
         this.reviewChatService = reviewChatService;
     }
@@ -95,7 +98,20 @@ public class CommitResultAgent implements NodeAction<CommitTaskState> {
                 compactPerformanceReport,
                 compactSecurityReport
         );
-        String validationResult = reviewChatService.callOrFallback(
+        boolean useCompactFirst = prompt.length() > Math.max(1600, finalPromptMaxChars);
+        if (useCompactFirst) {
+            log.warn("final-decision 提示词过长，优先使用紧凑提示词 promptChars={} threshold={}",
+                    prompt.length(), Math.max(1600, finalPromptMaxChars));
+        }
+
+        String validationResult = useCompactFirst
+                ? reviewChatService.callOrFallback(
+                "final-decision-compact-first",
+                buildCompactDecisionPrompt(state),
+                () -> "",
+                false
+        )
+                : reviewChatService.callOrFallback(
                 "final-decision",
                 prompt,
                 () -> "",
@@ -174,19 +190,20 @@ public class CommitResultAgent implements NodeAction<CommitTaskState> {
         if (content == null || content.isBlank()) {
             return "-";
         }
-        String normalized = content.trim();
+        String normalized = content
+                .replace('\r', '\n')
+                .replaceAll("\\n{3,}", "\n\n")
+                .replaceAll("[ \\t]{2,}", " ")
+                .trim();
         int safeMaxChars = Math.max(120, maxChars);
         if (normalized.length() <= safeMaxChars) {
             return normalized;
         }
-        int headLength = Math.max(60, safeMaxChars * 2 / 3);
-        int tailLength = Math.max(30, safeMaxChars - headLength);
-        if (headLength + tailLength >= normalized.length()) {
-            return normalized.substring(0, safeMaxChars);
+        int headLength = Math.max(80, safeMaxChars - 20);
+        if (headLength >= normalized.length()) {
+            return normalized;
         }
-        return normalized.substring(0, headLength)
-                + "\n...[内容截断，减少模型超时风险]...\n"
-                + normalized.substring(normalized.length() - tailLength);
+        return normalized.substring(0, headLength) + "\n...[内容截断]...";
     }
 
     private String buildCompactDecisionPrompt(CommitTaskState state) {
@@ -217,11 +234,11 @@ public class CommitResultAgent implements NodeAction<CommitTaskState> {
                 Objects.toString(state.getChangedFiles(), "0"),
                 Objects.toString(state.getAdditions(), "0"),
                 Objects.toString(state.getDeletions(), "0"),
-                compactForPrompt(state.getBusinessReport(), 260),
-                compactForPrompt(state.getConventionReport(), 220),
-                compactForPrompt(state.getPerformanceReport(), 220),
-                compactForPrompt(state.getSecurityReport(), 220),
-                compactForPrompt(state.getCodeImpactSummary(), 260)
+                compactForPrompt(state.getBusinessReport(), 180),
+                compactForPrompt(state.getConventionReport(), 150),
+                compactForPrompt(state.getPerformanceReport(), 150),
+                compactForPrompt(state.getSecurityReport(), 150),
+                compactForPrompt(state.getCodeImpactSummary(), 200)
         );
     }
 
