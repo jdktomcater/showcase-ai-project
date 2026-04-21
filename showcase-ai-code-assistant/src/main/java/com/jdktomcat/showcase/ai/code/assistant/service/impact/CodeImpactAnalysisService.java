@@ -175,14 +175,17 @@ public class CodeImpactAnalysisService {
                 return;
             }
             try {
-                IndexGraphResponse response = postForObject("/api/code/graph/index", Map.of(), IndexGraphResponse.class);
+                IndexGraphRequest indexGraphRequest = buildGraphIndexRequest(repository);
+                IndexGraphResponse response = postForObject("/api/code/graph/index", indexGraphRequest, IndexGraphResponse.class);
                 if (forceRebuild) {
-                    log.info("依赖图已强制重建 repository={} files={} nodes={} relations={} skipped={} fingerprint={}",
-                            repository, response.getFiles(), response.getNodes(), response.getRelations(), response.getSkippedFiles(),
+                    log.info("依赖图已强制重建 repository={} group={} project={} branch={} files={} nodes={} relations={} skipped={} fingerprint={}",
+                            repository, response.getGroup(), response.getProject(), response.getBranch(),
+                            response.getFiles(), response.getNodes(), response.getRelations(), response.getSkippedFiles(),
                             currentFingerprint);
                 } else {
-                    log.info("依赖图已重建 repository={} files={} nodes={} relations={} skipped={} fingerprint={}",
-                            repository, response.getFiles(), response.getNodes(), response.getRelations(), response.getSkippedFiles(),
+                    log.info("依赖图已重建 repository={} group={} project={} branch={} files={} nodes={} relations={} skipped={} fingerprint={}",
+                            repository, response.getGroup(), response.getProject(), response.getBranch(),
+                            response.getFiles(), response.getNodes(), response.getRelations(), response.getSkippedFiles(),
                             currentFingerprint);
                 }
                 dependencyGraphFingerprintByRepo.put(repoKey, currentFingerprint);
@@ -315,6 +318,23 @@ public class CodeImpactAnalysisService {
             return "unknown";
         }
         return repository.trim().toLowerCase();
+    }
+
+    private IndexGraphRequest buildGraphIndexRequest(String repository) {
+        if (repository == null || repository.isBlank()) {
+            return new IndexGraphRequest(null, null, null);
+        }
+
+        String normalized = repository.trim();
+        int slash = normalized.lastIndexOf('/');
+        if (slash > 0 && slash + 1 < normalized.length()) {
+            return new IndexGraphRequest(
+                    normalized.substring(0, slash),
+                    normalized.substring(slash + 1),
+                    null
+            );
+        }
+        return new IndexGraphRequest(null, normalized, null);
     }
 
     private String extractRepositoryName(String repository) {
@@ -1285,6 +1305,13 @@ public class CodeImpactAnalysisService {
     private record MethodTraceNode(String methodFqn, int depth) {
     }
 
+    private record IndexGraphRequest(
+            String group,
+            String project,
+            String branch
+    ) {
+    }
+
     @Data
     public static class DependencyResponse {
         private boolean success;
@@ -1343,6 +1370,9 @@ public class CodeImpactAnalysisService {
         private Integer nodes;
         private Integer relations;
         private Integer skippedFiles;
+        private String group;
+        private String project;
+        private String branch;
     }
 
     @Data

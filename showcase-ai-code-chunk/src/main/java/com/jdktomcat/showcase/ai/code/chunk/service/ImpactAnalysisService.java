@@ -107,7 +107,8 @@ public class ImpactAnalysisService {
 
     private Neo4jGraphRepository.GraphData internalOnly(Neo4jGraphRepository.GraphData graphData) {
         List<GraphViewNode> nodes = graphData.nodes().stream()
-                .filter(node -> node.filePath() != null && !node.filePath().isBlank())
+                .filter(node -> (node.filePath() != null && !node.filePath().isBlank())
+                        || isHierarchyNode(node.type()))
                 .toList();
 
         Set<String> nodeIds = new LinkedHashSet<>();
@@ -120,5 +121,12 @@ public class ImpactAnalysisService {
                 .toList();
 
         return new Neo4jGraphRepository.GraphData(nodes, edges);
+    }
+
+    private boolean isHierarchyNode(String type) {
+        if (type == null || type.isBlank()) {
+            return false;
+        }
+        return "GROUP".equals(type) || "PROJECT".equals(type) || "BRANCH".equals(type);
     }
 }

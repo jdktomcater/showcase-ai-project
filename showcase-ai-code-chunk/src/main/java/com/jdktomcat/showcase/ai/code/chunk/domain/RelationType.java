@@ -4,6 +4,7 @@ package com.jdktomcat.showcase.ai.code.chunk.domain;
  * Relation types in the impact chain.
  */
 public enum RelationType {
+    CONTAINS,
     DECLARES,
     CALLS,
     DEPENDS_ON,

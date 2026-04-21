@@ -51,6 +51,19 @@
 3. 构建影响链路
 4. 存储到 Neo4j
 
+也可以调用依赖图索引接口并传入 GitLab 层级上下文（`group -> project -> branch -> class -> method`）：
+
+```bash
+POST /api/code/graph/index
+Content-Type: application/json
+
+{
+  "group": "team-a",
+  "project": "checkout-service",
+  "branch": "feature/order-timeout"
+}
+```
+
 ### 4. 图交互
 
 - **拖拽节点**: 固定节点位置
@@ -127,6 +140,23 @@ Content-Type: application/json
   "entryPointId": "HTTP:com.example.Controller#method()",
   "mode": "single",
   "depth": 5
+}
+```
+
+### 依赖图索引
+
+```bash
+# 默认配置下重建依赖图
+POST /api/code/graph/index
+
+# 指定 GitLab 分层上下文
+POST /api/code/graph/index
+Content-Type: application/json
+
+{
+  "group": "team-a",
+  "project": "checkout-service",
+  "branch": "feature/order-timeout"
 }
 ```
 

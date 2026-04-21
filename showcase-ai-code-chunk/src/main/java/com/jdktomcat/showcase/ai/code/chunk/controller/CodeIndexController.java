@@ -4,6 +4,7 @@ import com.jdktomcat.showcase.ai.code.chunk.dto.CodeSearchHit;
 import com.jdktomcat.showcase.ai.code.chunk.dto.CodeLocationRequest;
 import com.jdktomcat.showcase.ai.code.chunk.dto.CodeSearchRequest;
 import com.jdktomcat.showcase.ai.code.chunk.dto.DependencyQueryRequest;
+import com.jdktomcat.showcase.ai.code.chunk.dto.GraphIndexRequest;
 import com.jdktomcat.showcase.ai.code.chunk.dto.GraphViewRequest;
 import com.jdktomcat.showcase.ai.code.chunk.dto.GraphViewResponse;
 import com.jdktomcat.showcase.ai.code.chunk.dto.ImpactQueryRequest;
@@ -47,6 +48,20 @@ public class CodeIndexController {
         );
     }
 
+
+    @PostMapping("/api/code/rebuild")
+    public Map<String, Object> rebuild() throws IOException {
+        log.info("收到代码重建索引请求");
+        long startTime = System.currentTimeMillis();
+        int count = codeIndexService.fullIndex();
+        long duration = System.currentTimeMillis() - startTime;
+        log.info("代码重建索引完成 indexedChunks={} 耗时={}ms", count, duration);
+        return Map.of(
+                "success", true,
+                "indexedChunks", count
+        );
+    }
+
     @PostMapping("/api/code/search")
     public Map<String, Object> search(@Valid @RequestBody CodeSearchRequest request) {
         log.debug("收到代码搜索请求 query={} topK={}", request.query(), request.resolvedTopK());
@@ -62,10 +77,17 @@ public class CodeIndexController {
     }
 
     @PostMapping("/api/code/graph/index")
-    public Map<String, Object> indexGraph() throws IOException {
-        log.info("收到依赖图索引请求");
+    public Map<String, Object> indexGraph(@RequestBody(required = false) GraphIndexRequest request) throws IOException {
+        log.info("收到依赖图索引请求 group={} project={} branch={}",
+                request == null ? null : request.group(),
+                request == null ? null : request.project(),
+                request == null ? null : request.branch());
         long startTime = System.currentTimeMillis();
-        Map<String, Object> result = dependencyIndexService.fullIndex();
+        Map<String, Object> result = dependencyIndexService.fullIndex(
+                request == null ? null : request.group(),
+                request == null ? null : request.project(),
+                request == null ? null : request.branch()
+        );
         long duration = System.currentTimeMillis() - startTime;
         log.info("依赖图索引完成 result={} 耗时={}ms", result, duration);
         return result;
