@@ -25,107 +25,21 @@ public class CommitResultAgent implements NodeAction<CommitTaskState> {
     @Value("${app.ai.review.final-section-max-chars:900}")
     private int finalSectionMaxChars;
 
-    @Value("${app.ai.review.final-prompt-max-chars:3200}")
-    private int finalPromptMaxChars;
-
     public CommitResultAgent(ReviewChatService reviewChatService) {
         this.reviewChatService = reviewChatService;
     }
 
     public void validate(CommitTaskState state) {
         boolean allSpecialReportsUnavailable = areAllSpecialReportsUnavailable(state);
-        String compactImpactSummary = compactForPrompt(state.getCodeImpactSummary());
-        String compactBusinessReport = compactForPrompt(state.getBusinessReport());
-        String compactConventionReport = compactForPrompt(state.getConventionReport());
-        String compactPerformanceReport = compactForPrompt(state.getPerformanceReport());
-        String compactSecurityReport = compactForPrompt(state.getSecurityReport());
 
-        String prompt = String.format("""
-                你是最终提交评审裁决专家。请综合 4 个专项报告给出 PASS/FAIL。
-                判定规则：
-                - FAIL：存在高风险安全问题、关键业务链路受损、显著性能风险、或严重规范问题影响可运行/可维护性。
-                - PASS：仅有一般优化建议或低风险问题。
-                输出要求：
-                - 只输出合法 JSON，不要 Markdown 代码块。
-                - decision 只能是 "PASS" 或 "FAIL"。
-                - finalReport 必须包含“## 总体结论”“## 关键风险”“## 建议动作”。
-                - summary 尽量不超过 50 字。
-                - finalReport 总字数尽量不超过 260 字。
-                - telegramMessage 尽量不超过 120 字。
-                JSON 字段：
-                {"decision":"PASS/FAIL","summary":"...","finalReport":"...","telegramMessage":"..."}
-                
-                提交上下文：
-                - 仓库：%s
-                - 分支：%s
-                - 提交：%s
-                - 作者：%s <%s>
-                - 变更文件数：%s
-                - 新增行数：%s
-                - 删除行数：%s
-                - Compare URL：%s
-                - 影响入口点：
-                %s
-                
-                依赖图影响面摘要：
-                %s
-                
-                BusinessAgent 报告：
-                %s
-                
-                ConventionAgent 报告：
-                %s
-                
-                PerformanceAgent 报告：
-                %s
-                
-                SecurityAgent 报告：
-                %s
-                """,
-                state.getRepository(),
-                state.getBranch(),
-                state.getSha(),
-                state.getAuthor(),
-                state.getEmail(),
-                Objects.toString(state.getChangedFiles(), "0"),
-                Objects.toString(state.getAdditions(), "0"),
-                Objects.toString(state.getDeletions(), "0"),
-                state.getCompareUrl(),
-                formatAffectedEntryPoints(state.getAffectedEntryPoints()),
-                compactImpactSummary,
-                compactBusinessReport,
-                compactConventionReport,
-                compactPerformanceReport,
-                compactSecurityReport
-        );
-        boolean useCompactFirst = prompt.length() > Math.max(1600, finalPromptMaxChars);
-        if (useCompactFirst) {
-            log.warn("final-decision 提示词过长，优先使用紧凑提示词 promptChars={} threshold={}",
-                    prompt.length(), Math.max(1600, finalPromptMaxChars));
-        }
-
-        String validationResult = useCompactFirst
-                ? reviewChatService.callOrFallback(
-                "final-decision-compact-first",
+        String validationResult = reviewChatService.callOrFallback(
+                "final-decision-compact",
                 buildCompactDecisionPrompt(state),
-                () -> "",
-                false
-        )
-                : reviewChatService.callOrFallback(
-                "final-decision",
-                prompt,
-                () -> "",
+                () -> fallbackDecisionJson(allSpecialReportsUnavailable),
                 false
         );
         if (isBlankResponse(validationResult)) {
-            log.warn("final-decision 返回空响应，尝试紧凑提示词重试");
-            validationResult = reviewChatService.callOrFallback(
-                    "final-decision-compact",
-                    buildCompactDecisionPrompt(state),
-                    () -> fallbackDecisionJson(allSpecialReportsUnavailable)
-            );
-        }
-        if (isBlankResponse(validationResult)) {
+            log.warn("final-decision 仍为空响应，使用兜底决策 JSON");
             validationResult = fallbackDecisionJson(allSpecialReportsUnavailable);
         }
         log.info("提交裁决原始结果：{}", validationResult);

@@ -101,7 +101,7 @@ class CommitResultAgentTest {
     }
 
     @Test
-    void shouldUseCompactPromptFirstWhenFinalPromptTooLong() {
+    void shouldUseCompactPromptForFinalDecision() {
         ChatModel chatModel = mock(ChatModel.class);
         when(chatModel.call(anyString())).thenReturn("""
                 {
@@ -119,8 +119,6 @@ class CommitResultAgentTest {
         ReflectionTestUtils.setField(reviewChatService, "failOpen", true);
 
         CommitResultAgent agent = new CommitResultAgent(reviewChatService);
-        ReflectionTestUtils.setField(agent, "finalPromptMaxChars", 1600);
-
         CommitTaskState state = new CommitTaskState();
         state.setRepository("jdktomcater/showcase-pay");
         state.setBranch("main");
