@@ -177,4 +177,29 @@ class CommitResultAgentTest {
         assertThat(state.getFinalReport()).doesNotContain("模型未返回有效总结");
         assertThat(state.getTelegramMessage()).contains("结论: FAIL");
     }
+
+    @Test
+    void shouldRecoverTruncatedJsonDecisionResult() {
+        ChatModel chatModel = mock(ChatModel.class);
+        when(chatModel.call(anyString())).thenReturn("""
+                {"decision":"PASS","summary":"新增info日志，风险低，无安全或性能问题","finalReport":"## 总体结论\\n本次提交仅在 OrderServiceImpl#createOrder 中新增一条 info 级别日志，未涉及业务逻辑变更，风险等级评估为低风险，建议通过。\\n\\n## 关键风险\\n暂无关键风险点，未发现安全、关键业务链路受损或显著性能问题。\\n\\n## 建议动作\\n1.`
+                """);
+
+        DefaultListableBeanFactory beanFactory = new DefaultListableBeanFactory();
+        beanFactory.registerSingleton("chatModel", chatModel);
+        ReviewChatService reviewChatService = new ReviewChatService(beanFactory.getBeanProvider(ChatModel.class));
+        ReflectionTestUtils.setField(reviewChatService, "aiReviewEnabled", true);
+        ReflectionTestUtils.setField(reviewChatService, "failOpen", true);
+
+        CommitResultAgent agent = new CommitResultAgent(reviewChatService);
+        CommitTaskState state = new CommitTaskState();
+        state.setRepository("jdktomcater/showcase-pay");
+
+        agent.validate(state);
+
+        assertThat(state.getDecision()).isEqualTo("PASS");
+        assertThat(state.getFinalReport()).contains("## 总体结论");
+        assertThat(state.getFinalReport()).contains("## 建议动作");
+        assertThat(state.getTelegramMessage()).contains("结论: PASS");
+    }
 }

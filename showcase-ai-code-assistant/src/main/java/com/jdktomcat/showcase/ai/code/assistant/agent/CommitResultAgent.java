@@ -12,6 +12,8 @@ import org.springframework.stereotype.Component;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * 结果校验 Agent：检查报告是否满足用户需求，不满足则标记重试
@@ -19,6 +21,11 @@ import java.util.Objects;
 @Component
 @Slf4j
 public class CommitResultAgent implements NodeAction<CommitTaskState> {
+
+    private static final Pattern DECISION_PATTERN =
+            Pattern.compile("\"decision\"\\s*:\\s*\"(PASS|FAIL)\"", Pattern.CASE_INSENSITIVE);
+    private static final Pattern SUMMARY_PATTERN =
+            Pattern.compile("\"summary\"\\s*:\\s*\"((?:\\\\.|[^\"\\\\])*)\"", Pattern.DOTALL);
 
     private final ReviewChatService reviewChatService;
 
@@ -48,7 +55,7 @@ public class CommitResultAgent implements NodeAction<CommitTaskState> {
             result = JSONUtils.parseMap(extractJson(validationResult));
         } catch (Exception ex) {
             log.warn("提交裁决结果解析失败，使用兜底逻辑 raw={}", validationResult, ex);
-            result = Map.of("decision", "FAIL", "summary", "模型返回结果无法解析，已按高风险处理", "finalReport", "## 总体结论\nFAIL\n\n## 关键风险\n- 模型返回结果无法解析，请人工复核。\n\n## 建议动作\n- 检查模型输出格式并重新触发评审。", "telegramMessage", "结论: FAIL\n原因: 模型返回结果无法解析，请人工复核。");
+            result = recoverMalformedDecisionResult(validationResult);
         }
         String decision = Objects.toString(result.getOrDefault("decision", "FAIL")).trim().toUpperCase();
         String summary = resolveSummary(result, decision);
@@ -220,6 +227,60 @@ public class CommitResultAgent implements NodeAction<CommitTaskState> {
         return normalized.substring(0, max - 1) + "…";
     }
 
+    private Map<String, Object> recoverMalformedDecisionResult(String rawOutput) {
+        String decision = extractDecision(rawOutput);
+        String summary = extractSummary(rawOutput);
+        if (summary == null || summary.isBlank()) {
+            summary = "PASS".equals(decision)
+                    ? "模型输出被截断，已按低风险补全结构化结果，请人工复核"
+                    : "模型输出被截断，已按高风险补全结构化结果，请人工复核";
+        }
+        String finalReport = "## 总体结论\n" + decision
+                + "\n\n## 关键风险\n- " + summary
+                + "\n\n## 建议动作\n- 模型输出存在截断或格式异常，请人工复核后再决策。";
+        String telegramMessage = "结论: " + decision + "\n原因: " + truncateForSummary(summary);
+        return Map.of(
+                "decision", decision,
+                "summary", summary,
+                "finalReport", finalReport,
+                "telegramMessage", telegramMessage
+        );
+    }
+
+    private String extractDecision(String rawOutput) {
+        if (rawOutput == null) {
+            return "FAIL";
+        }
+        Matcher matcher = DECISION_PATTERN.matcher(rawOutput);
+        if (!matcher.find()) {
+            return "FAIL";
+        }
+        return matcher.group(1).toUpperCase();
+    }
+
+    private String extractSummary(String rawOutput) {
+        if (rawOutput == null) {
+            return null;
+        }
+        Matcher matcher = SUMMARY_PATTERN.matcher(rawOutput);
+        if (!matcher.find()) {
+            return null;
+        }
+        return unescapeJsonString(matcher.group(1)).trim();
+    }
+
+    private String unescapeJsonString(String value) {
+        if (value == null) {
+            return null;
+        }
+        return value
+                .replace("\\n", "\n")
+                .replace("\\r", "\r")
+                .replace("\\t", "\t")
+                .replace("\\\"", "\"")
+                .replace("\\\\", "\\");
+    }
+
     private String fallbackDecisionJson(boolean allSpecialReportsUnavailable) {
         if (allSpecialReportsUnavailable) {
             return """
@@ -314,6 +375,9 @@ public class CommitResultAgent implements NodeAction<CommitTaskState> {
         int end = trimmed.lastIndexOf('}');
         if (start >= 0 && end >= start) {
             return trimmed.substring(start, end + 1);
+        }
+        if (start >= 0) {
+            return trimmed.substring(start);
         }
         return "{}";
     }
