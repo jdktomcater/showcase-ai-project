@@ -137,4 +137,44 @@ class CommitResultAgentTest {
         verify(chatModel, times(1)).call(argThat((String prompt) -> prompt.contains("专项审查摘要")));
         assertThat(state.getDecision()).isEqualTo("PASS");
     }
+
+    @Test
+    void shouldRecoverMissingSummaryAndFinalReportFromModelResult() {
+        ChatModel chatModel = mock(ChatModel.class);
+        when(chatModel.call(anyString())).thenReturn("""
+                {
+                  "decision": "FAIL"
+                }
+                """);
+
+        DefaultListableBeanFactory beanFactory = new DefaultListableBeanFactory();
+        beanFactory.registerSingleton("chatModel", chatModel);
+        ReviewChatService reviewChatService = new ReviewChatService(beanFactory.getBeanProvider(ChatModel.class));
+        ReflectionTestUtils.setField(reviewChatService, "aiReviewEnabled", true);
+        ReflectionTestUtils.setField(reviewChatService, "failOpen", true);
+
+        CommitResultAgent agent = new CommitResultAgent(reviewChatService);
+        CommitTaskState state = new CommitTaskState();
+        state.setRepository("jdktomcater/showcase-pay");
+        state.setAffectedEntryPoints(List.of(
+                new AffectedEntryPoint(
+                        "HTTP:com.demo.OrderController#create()",
+                        "HTTP",
+                        "/api/order/create",
+                        "POST",
+                        "com.demo.OrderController",
+                        "create",
+                        "com.demo.OrderController#create()"
+                )
+        ));
+
+        agent.validate(state);
+
+        assertThat(state.getDecision()).isEqualTo("FAIL");
+        assertThat(state.getFinalReport()).contains("## 总体结论");
+        assertThat(state.getFinalReport()).contains("## 关键风险");
+        assertThat(state.getFinalReport()).contains("## 建议动作");
+        assertThat(state.getFinalReport()).doesNotContain("模型未返回有效总结");
+        assertThat(state.getTelegramMessage()).contains("结论: FAIL");
+    }
 }

@@ -51,13 +51,13 @@ public class CommitResultAgent implements NodeAction<CommitTaskState> {
             result = Map.of("decision", "FAIL", "summary", "模型返回结果无法解析，已按高风险处理", "finalReport", "## 总体结论\nFAIL\n\n## 关键风险\n- 模型返回结果无法解析，请人工复核。\n\n## 建议动作\n- 检查模型输出格式并重新触发评审。", "telegramMessage", "结论: FAIL\n原因: 模型返回结果无法解析，请人工复核。");
         }
         String decision = Objects.toString(result.getOrDefault("decision", "FAIL")).trim().toUpperCase();
-        String summary = Objects.toString(result.getOrDefault("summary", "模型未返回有效总结"));
+        String summary = resolveSummary(result, decision);
         String finalReport = appendAffectedEntryPointsSection(
-                Objects.toString(result.getOrDefault("finalReport", summary)),
+                resolveFinalReport(result, decision, summary),
                 state.getAffectedEntryPoints()
         );
         String telegramMessage = appendAffectedEntryPointsSummary(
-                Objects.toString(result.getOrDefault("telegramMessage", finalReport)),
+                resolveTelegramMessage(result, decision, summary),
                 state.getAffectedEntryPoints()
         );
         boolean passed = "PASS".equals(decision);
@@ -158,6 +158,66 @@ public class CommitResultAgent implements NodeAction<CommitTaskState> {
 
     private boolean isBlankResponse(String value) {
         return value == null || value.isBlank();
+    }
+
+    private String resolveSummary(Map<String, Object> result, String decision) {
+        String summary = normalizeModelField(result.get("summary"));
+        if (summary != null) {
+            return summary;
+        }
+        String telegramMessage = normalizeModelField(result.get("telegramMessage"));
+        if (telegramMessage != null) {
+            return truncateForSummary(telegramMessage);
+        }
+        String finalReport = normalizeModelField(result.get("finalReport"));
+        if (finalReport != null) {
+            return truncateForSummary(finalReport.replaceAll("(?m)^##\\s*", ""));
+        }
+        if ("PASS".equals(decision)) {
+            return "未发现阻断发布风险，请结合专项报告复核";
+        }
+        return "检测到中高风险，请优先处理后再发布";
+    }
+
+    private String resolveFinalReport(Map<String, Object> result, String decision, String summary) {
+        String finalReport = normalizeModelField(result.get("finalReport"));
+        if (finalReport != null) {
+            return finalReport;
+        }
+        return "## 总体结论\n" + decision
+                + "\n\n## 关键风险\n- " + summary
+                + "\n\n## 建议动作\n- 结合业务/规范/性能/安全专项报告进行人工复核。";
+    }
+
+    private String resolveTelegramMessage(Map<String, Object> result, String decision, String summary) {
+        String telegramMessage = normalizeModelField(result.get("telegramMessage"));
+        if (telegramMessage != null) {
+            return telegramMessage;
+        }
+        return "结论: " + decision + "\n原因: " + truncateForSummary(summary);
+    }
+
+    private String normalizeModelField(Object raw) {
+        if (raw == null) {
+            return null;
+        }
+        String value = raw.toString().trim();
+        if (value.isEmpty() || "null".equalsIgnoreCase(value)) {
+            return null;
+        }
+        return value;
+    }
+
+    private String truncateForSummary(String text) {
+        if (text == null || text.isBlank()) {
+            return "模型未提供可用摘要";
+        }
+        String normalized = text.replace('\n', ' ').replaceAll("\\s{2,}", " ").trim();
+        int max = 50;
+        if (normalized.length() <= max) {
+            return normalized;
+        }
+        return normalized.substring(0, max - 1) + "…";
     }
 
     private String fallbackDecisionJson(boolean allSpecialReportsUnavailable) {
