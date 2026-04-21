@@ -95,7 +95,12 @@ public class CommitResultAgent implements NodeAction<CommitTaskState> {
                 compactPerformanceReport,
                 compactSecurityReport
         );
-        String validationResult = reviewChatService.callOrFallback("final-decision", prompt, () -> "");
+        String validationResult = reviewChatService.callOrFallback(
+                "final-decision",
+                prompt,
+                () -> "",
+                false
+        );
         if (isBlankResponse(validationResult)) {
             log.warn("final-decision 返回空响应，尝试紧凑提示词重试");
             validationResult = reviewChatService.callOrFallback(

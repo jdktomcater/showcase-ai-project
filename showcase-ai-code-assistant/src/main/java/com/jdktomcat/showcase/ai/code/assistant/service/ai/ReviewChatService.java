@@ -47,6 +47,13 @@ public class ReviewChatService {
     }
 
     public String callOrFallback(String purpose, String prompt, Supplier<String> fallbackSupplier) {
+        return callOrFallback(purpose, prompt, fallbackSupplier, true);
+    }
+
+    public String callOrFallback(String purpose,
+                                 String prompt,
+                                 Supplier<String> fallbackSupplier,
+                                 boolean warnOnBlankResponse) {
         if (!aiReviewEnabled) {
             log.info("AI review disabled, using fallback purpose={}", purpose);
             return fallbackSupplier.get();
@@ -69,7 +76,11 @@ public class ReviewChatService {
         try {
             String response = chatModel.call(normalizedPrompt);
             if (StringUtils.isBlank(response)) {
-                log.warn("ChatModel returned blank response, using fallback purpose={}", purpose);
+                if (warnOnBlankResponse) {
+                    log.warn("ChatModel returned blank response, using fallback purpose={}", purpose);
+                } else {
+                    log.info("ChatModel returned blank response, trying caller fallback flow purpose={}", purpose);
+                }
                 return fallbackSupplier.get();
             }
             return response;
