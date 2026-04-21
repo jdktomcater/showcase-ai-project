@@ -66,6 +66,7 @@ app:
       enabled: ${AI_REVIEW_ENABLED:true}
       fail-open: ${AI_REVIEW_FAIL_OPEN:true}
       final-section-max-chars: ${AI_REVIEW_FINAL_SECTION_MAX_CHARS:900}
+      quality-diff-max-chars: ${AI_REVIEW_QUALITY_DIFF_MAX_CHARS:4200}
     ollama:
       max-concurrent-calls: ${OLLAMA_MAX_CONCURRENT_CALLS:1}
       acquire-timeout: ${OLLAMA_ACQUIRE_TIMEOUT:8s}
