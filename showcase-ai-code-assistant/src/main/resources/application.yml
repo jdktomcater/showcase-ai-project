@@ -57,7 +57,7 @@ spring:
           model: ${OLLAMA_CHAT_MODEL:gpt-oss:120b-cloud}
           keep_alive: ${OLLAMA_CHAT_KEEP_ALIVE:30m}
           temperature: ${OLLAMA_CHAT_TEMPERATURE:0.1}
-          num-predict: ${OLLAMA_CHAT_NUM_PREDICT:320}
+          num-predict: ${OLLAMA_CHAT_NUM_PREDICT:640}
           num-ctx: ${OLLAMA_CHAT_NUM_CTX:3072}
 
 app:
@@ -67,6 +67,9 @@ app:
       fail-open: ${AI_REVIEW_FAIL_OPEN:true}
       final-section-max-chars: ${AI_REVIEW_FINAL_SECTION_MAX_CHARS:900}
       quality-diff-max-chars: ${AI_REVIEW_QUALITY_DIFF_MAX_CHARS:4200}
+      quality-business-max-chars: ${AI_REVIEW_QUALITY_BUSINESS_MAX_CHARS:260}
+      quality-impact-max-chars: ${AI_REVIEW_QUALITY_IMPACT_MAX_CHARS:360}
+      quality-prompt-max-chars: ${AI_REVIEW_QUALITY_PROMPT_MAX_CHARS:4800}
     ollama:
       max-concurrent-calls: ${OLLAMA_MAX_CONCURRENT_CALLS:1}
       acquire-timeout: ${OLLAMA_ACQUIRE_TIMEOUT:8s}

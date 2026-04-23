@@ -19,6 +19,8 @@ import java.util.regex.Pattern;
 @Component
 public class QualityAgent implements NodeAction<CommitTaskState> {
 
+    private static final String BLANK_RETRY_SENTINEL = "__QUALITY_MODEL_EMPTY__";
+
     private static final Pattern DECISION_PATTERN =
             Pattern.compile("\"decision\"\\s*:\\s*\"(PASS|FAIL)\"", Pattern.CASE_INSENSITIVE);
     private static final Pattern SUMMARY_PATTERN =
@@ -30,22 +32,19 @@ public class QualityAgent implements NodeAction<CommitTaskState> {
     private int qualityDiffMaxChars;
     @Value("${app.ai.review.final-section-max-chars:900}")
     private int finalSectionMaxChars;
+    @Value("${app.ai.review.quality-business-max-chars:260}")
+    private int qualityBusinessMaxChars;
+    @Value("${app.ai.review.quality-impact-max-chars:360}")
+    private int qualityImpactMaxChars;
+    @Value("${app.ai.review.quality-prompt-max-chars:4800}")
+    private int qualityPromptMaxChars;
 
     public QualityAgent(ReviewChatService reviewChatService) {
         this.reviewChatService = reviewChatService;
     }
 
     public void review(CommitTaskState state) {
-        String response = reviewChatService.callOrFallback(
-                "quality-review",
-                buildUnifiedPrompt(state),
-                () -> fallbackUnifiedJson(state),
-                false
-        );
-        if (isBlankResponse(response)) {
-            log.warn("quality-review 返回空响应，使用兜底结果");
-            response = fallbackUnifiedJson(state);
-        }
+        String response = invokeModelWithCompactRetry(state);
 
         Map<String, Object> result;
         try {
@@ -93,34 +92,60 @@ public class QualityAgent implements NodeAction<CommitTaskState> {
                 decision, conventionReport.length(), performanceReport.length(), securityReport.length());
     }
 
+    private String invokeModelWithCompactRetry(CommitTaskState state) {
+        String primaryResponse = reviewChatService.callOrFallback(
+                "quality-review",
+                limitQualityPrompt(buildUnifiedPrompt(state)),
+                this::blankRetrySentinel,
+                false
+        );
+        if (!isBlankRetrySentinel(primaryResponse) && !isBlankResponse(primaryResponse)) {
+            return primaryResponse;
+        }
+
+        log.warn("quality-review 首次返回空结果，使用紧凑提示词重试一次");
+        String compactResponse = reviewChatService.callOrFallback(
+                "quality-review-compact",
+                limitQualityPrompt(buildCompactRetryPrompt(state)),
+                () -> fallbackUnifiedJson(state),
+                false
+        );
+        if (isBlankResponse(compactResponse) || isBlankRetrySentinel(compactResponse)) {
+            log.warn("quality-review-compact 仍为空响应，使用兜底结果");
+            return fallbackUnifiedJson(state);
+        }
+        return compactResponse;
+    }
+
     private String buildUnifiedPrompt(CommitTaskState state) {
         return String.format("""
                 你是代码评审专家。请基于同一份 Diff，一次性输出规范、性能、安全三份审查报告，并给出最终发布裁决。
                 只输出合法 JSON，不要 Markdown 代码块，不要额外解释。
                 
-                输出 JSON 字段：
+                必填 JSON 字段：
                 {
                   "conventionReport":"...",
                   "performanceReport":"...",
                   "securityReport":"...",
                   "decision":"PASS/FAIL",
-                  "summary":"<=50字",
-                  "finalReport":"包含 ## 总体结论/## 关键风险/## 建议动作",
-                  "telegramMessage":"<=120字"
+                  "summary":"<=50字"
                 }
+                可选 JSON 字段：
+                {"telegramMessage":"<=120字","finalReport":"包含 ## 总体结论/## 关键风险/## 建议动作"}
+                注意：可选字段缺失时系统会自动生成，严禁返回空字符串。
                 
                 字段要求（每个 report 都必须满足）：
                 - 使用中文 Markdown。
                 - 包含且仅包含以下三级结构：
                   ## 结论
                   风险等级：低风险 / 中风险 / 高风险
+
+                ## 发现
+                - 最多 2 条
                   
-                  ## 发现
-                  - 最多 3 条
-                  
-                  ## 建议
-                  - 最多 3 条
-                - 每个 report 尽量不超过 220 字。
+                ## 建议
+                - 最多 2 条
+                - 每个 report 尽量不超过 160 字。
                 
                 审查重点：
                 - conventionReport：命名、异常处理、风格一致性、重复逻辑、可测试性。
@@ -155,11 +180,72 @@ public class QualityAgent implements NodeAction<CommitTaskState> {
                 Objects.toString(state.getChangedFiles(), "0"),
                 Objects.toString(state.getAdditions(), "0"),
                 Objects.toString(state.getDeletions(), "0"),
-                compactForPrompt(state.getBusinessReport(), Math.max(280, finalSectionMaxChars / 2)),
-                compactForPrompt(state.getCodeImpactSummary(), Math.max(350, finalSectionMaxChars)),
+                compactForPrompt(state.getBusinessReport(), Math.max(180, qualityBusinessMaxChars)),
+                compactForPrompt(state.getCodeImpactSummary(), Math.max(240, qualityImpactMaxChars)),
                 formatAffectedEntryPoints(state.getAffectedEntryPoints()),
                 compactDiff(state.getDiff())
         );
+    }
+
+    private String buildCompactRetryPrompt(CommitTaskState state) {
+        return String.format("""
+                你是代码评审专家。模型上次响应为空，请基于最小上下文输出非空 JSON。
+                仅输出 JSON，不要代码块、不要解释。
+
+                必填字段：
+                {"conventionReport":"...","performanceReport":"...","securityReport":"...","decision":"PASS/FAIL","summary":"<=40字"}
+                可选字段：
+                {"telegramMessage":"<=80字"}
+
+                强约束：
+                - 所有必填字段必须非空。
+                - 每个 report 用中文 Markdown，结构固定：
+                  ## 结论
+                  风险等级：低风险 / 中风险 / 高风险
+                  ## 发现
+                  - 最多 1 条
+                  ## 建议
+                  - 最多 1 条
+                - 若上下文不足，使用“未识别明显风险”补齐，不得留空。
+
+                提交：
+                - 仓库：%s
+                - 分支：%s
+                - 提交：%s
+                - 文件：%s，新增：%s，删除：%s
+                - 入口点：%s
+
+                业务摘要（压缩）：
+                %s
+
+                影响摘要（压缩）：
+                %s
+
+                Diff（压缩）：
+                %s
+                """,
+                state.getRepository(),
+                state.getBranch(),
+                state.getSha(),
+                Objects.toString(state.getChangedFiles(), "0"),
+                Objects.toString(state.getAdditions(), "0"),
+                Objects.toString(state.getDeletions(), "0"),
+                shortEntryPointsSummary(state.getAffectedEntryPoints()),
+                compactForPrompt(state.getBusinessReport(), 180),
+                compactForPrompt(state.getCodeImpactSummary(), 220),
+                compactDiff(state.getDiff())
+        );
+    }
+
+    private String shortEntryPointsSummary(List<AffectedEntryPoint> affectedEntryPoints) {
+        if (affectedEntryPoints == null || affectedEntryPoints.isEmpty()) {
+            return "-";
+        }
+        return affectedEntryPoints.stream()
+                .limit(2)
+                .map(this::shortEntryPointLabel)
+                .reduce((left, right) -> left + "; " + right)
+                .orElse("-");
     }
 
     private String compactForPrompt(String content, int maxChars) {
@@ -191,6 +277,18 @@ public class QualityAgent implements NodeAction<CommitTaskState> {
             return diff;
         }
         return diff.substring(0, safeMaxChars) + "\n...[diff truncated for unified quality review]...";
+    }
+
+    private String limitQualityPrompt(String prompt) {
+        if (prompt == null || prompt.isBlank()) {
+            return "";
+        }
+        int safeMaxChars = Math.max(1800, qualityPromptMaxChars);
+        if (prompt.length() <= safeMaxChars) {
+            return prompt;
+        }
+        return prompt.substring(0, safeMaxChars)
+                + "\n...[quality prompt truncated to avoid empty model response]...";
     }
 
     private String extractJson(String modelOutput) {
@@ -228,7 +326,7 @@ public class QualityAgent implements NodeAction<CommitTaskState> {
                 fallbackConventionReport(), fallbackPerformanceReport(), fallbackSecurityReport());
         String summary = allSpecialReportsUnavailable
                 ? "AI 模型当前不可用，已返回降级评审结果，请结合专项报告人工复核"
-                : "最终裁决模型未返回有效结果，请优先参考专项报告并人工复核";
+                : "质量评审模型未返回完整结果，请优先参考专项报告并人工复核";
         String finalReport = "## 总体结论\nPASS"
                 + "\n\n## 关键风险\n- " + summary
                 + "\n\n## 建议动作\n- 检查模型配置后重试，并结合专项报告进行人工复核。";
@@ -541,6 +639,14 @@ public class QualityAgent implements NodeAction<CommitTaskState> {
 
     private boolean isBlankResponse(String value) {
         return value == null || value.isBlank();
+    }
+
+    private String blankRetrySentinel() {
+        return BLANK_RETRY_SENTINEL;
+    }
+
+    private boolean isBlankRetrySentinel(String response) {
+        return BLANK_RETRY_SENTINEL.equals(response);
     }
 
     @Override

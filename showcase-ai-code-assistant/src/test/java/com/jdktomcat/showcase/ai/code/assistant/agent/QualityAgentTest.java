@@ -134,7 +134,7 @@ class QualityAgentTest {
 
         agent.review(state);
 
-        verify(chatModel, times(1)).call(argThat((String prompt) -> prompt.contains("输出 JSON 字段")));
+        verify(chatModel, times(1)).call(argThat((String prompt) -> prompt.contains("必填 JSON 字段")));
         assertThat(state.getDecision()).isEqualTo("PASS");
         assertThat(state.getFinalReport()).contains("## 总体结论");
         assertThat(state.getFinalReport()).contains("## 建议动作");
@@ -152,6 +152,9 @@ class QualityAgentTest {
         QualityAgent agent = new QualityAgent(reviewChatService);
         ReflectionTestUtils.setField(agent, "qualityDiffMaxChars", 4200);
         ReflectionTestUtils.setField(agent, "finalSectionMaxChars", 900);
+        ReflectionTestUtils.setField(agent, "qualityBusinessMaxChars", 260);
+        ReflectionTestUtils.setField(agent, "qualityImpactMaxChars", 360);
+        ReflectionTestUtils.setField(agent, "qualityPromptMaxChars", 4800);
         return agent;
     }
 }

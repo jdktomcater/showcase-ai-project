@@ -60,50 +60,124 @@ public class TelegramNotificationService {
     }
 
     private String buildMessage(CommitTaskState state) {
+        String reviewOpinion = resolveReviewOpinion(state);
+        String entryPointSummary = resolveEntryPointSummary(state);
+
         StringBuilder builder = new StringBuilder();
         builder.append("GitHub 提交评审结果").append('\n')
-                .append("仓库: ").append(state.getRepository()).append('\n')
-                .append("分支: ").append(state.getBranch()).append('\n')
-                .append("提交: ").append(state.getSha()).append('\n')
-                .append("描述: ").append(state.getMessage()).append('\n')
-                .append("作者: ").append(state.getAuthor()).append('\n')
-                .append("结论: ").append(state.getDecision()).append('\n');
+                .append("仓库: ").append(StringUtils.defaultString(state.getRepository())).append('\n')
+                .append("分支: ").append(StringUtils.defaultString(state.getBranch())).append('\n')
+                .append("提交: ").append(StringUtils.defaultString(state.getSha())).append('\n')
+                .append("描述: ").append(StringUtils.defaultString(state.getMessage())).append('\n')
+                .append("作者: ").append(StringUtils.defaultString(state.getAuthor())).append('\n')
+                .append("结论: ").append(defaultValue(state.getDecision(), "UNKNOWN"))
+                .append('\n')
+                .append('\n')
+                .append("评审意见: ").append(reviewOpinion);
 
-        if (StringUtils.isNotBlank(state.getTelegramMessage())) {
-            builder.append('\n').append(state.getTelegramMessage()).append('\n');
-        } else if (StringUtils.isNotBlank(state.getFinalReport())) {
-            builder.append('\n').append(state.getFinalReport()).append('\n');
+        if (StringUtils.isNotBlank(entryPointSummary)) {
+            builder.append('\n').append("影响入口点: ").append(entryPointSummary);
         }
-
-        if (state.getAffectedEntryPoints() != null
-                && !state.getAffectedEntryPoints().isEmpty()
-                && builder.indexOf("影响入口点") < 0) {
-            builder.append('\n')
-                    .append("影响入口点: ")
-                    .append(formatAffectedEntryPoints(state.getAffectedEntryPoints()))
-                    .append('\n');
-        }
-
         if (StringUtils.isNotBlank(state.getCompareUrl())) {
-            builder.append('\n').append("Compare: ").append(state.getCompareUrl());
+            builder.append('\n').append('\n').append("Compare: ").append(state.getCompareUrl());
         }
 
         return builder.toString();
     }
 
+    private String resolveReviewOpinion(CommitTaskState state) {
+        String opinion = extractOpinionFromTelegramMessage(state.getTelegramMessage());
+        if (StringUtils.isNotBlank(opinion)) {
+            return opinion;
+        }
+        opinion = extractOpinionFromFinalReport(state.getFinalReport());
+        if (StringUtils.isNotBlank(opinion)) {
+            return opinion;
+        }
+        return "未提供评审意见，请结合专项报告人工复核。";
+    }
+
+    private String extractOpinionFromTelegramMessage(String telegramMessage) {
+        if (StringUtils.isBlank(telegramMessage)) {
+            return "";
+        }
+        StringBuilder normalized = new StringBuilder();
+        for (String rawLine : telegramMessage.split("\\R")) {
+            String line = rawLine == null ? "" : rawLine.trim();
+            if (line.isEmpty()) {
+                continue;
+            }
+            if (line.startsWith("结论:") || line.startsWith("Compare:") || line.startsWith("影响入口点:")) {
+                continue;
+            }
+            if (line.startsWith("原因:")) {
+                line = StringUtils.trimToEmpty(line.substring("原因:".length()));
+            }
+            if (line.isEmpty()) {
+                continue;
+            }
+            if (!normalized.isEmpty()) {
+                normalized.append(' ');
+            }
+            normalized.append(line);
+        }
+        return normalized.toString();
+    }
+
+    private String extractOpinionFromFinalReport(String finalReport) {
+        if (StringUtils.isBlank(finalReport)) {
+            return "";
+        }
+        for (String rawLine : finalReport.split("\\R")) {
+            String line = rawLine == null ? "" : rawLine.trim();
+            if (line.startsWith("- ")) {
+                return line.substring(2).trim();
+            }
+        }
+        String normalized = finalReport.replaceAll("(?m)^##\\s*\\S+\\s*$", "")
+                .replace('\n', ' ')
+                .replaceAll("\\s{2,}", " ")
+                .trim();
+        return StringUtils.abbreviate(normalized, 120);
+    }
+
+    private String resolveEntryPointSummary(CommitTaskState state) {
+        if (state.getAffectedEntryPoints() == null || state.getAffectedEntryPoints().isEmpty()) {
+            return extractEntryPointFromTelegramMessage(state.getTelegramMessage());
+        }
+        return formatAffectedEntryPoints(state.getAffectedEntryPoints());
+    }
+
+    private String extractEntryPointFromTelegramMessage(String telegramMessage) {
+        if (StringUtils.isBlank(telegramMessage)) {
+            return "";
+        }
+        for (String rawLine : telegramMessage.split("\\R")) {
+            String line = rawLine == null ? "" : rawLine.trim();
+            if (!line.startsWith("影响入口点:")) {
+                continue;
+            }
+            return StringUtils.trimToEmpty(line.substring("影响入口点:".length()));
+        }
+        return "";
+    }
+
     private String formatAffectedEntryPoints(List<AffectedEntryPoint> affectedEntryPoints) {
         return affectedEntryPoints.stream()
                 .limit(3)
-                .map(this::toDisplayText)
+                .map(this::toCompactDisplayText)
                 .reduce((left, right) -> left + ", " + right)
                 .orElse("-");
     }
 
-    private String toDisplayText(AffectedEntryPoint entryPoint) {
+    private String toCompactDisplayText(AffectedEntryPoint entryPoint) {
         if (StringUtils.isNotBlank(entryPoint.getRoute())) {
-            return entryPoint.getType() + " " + entryPoint.getRoute() + " -> "
-                    + entryPoint.getClassName() + "#" + entryPoint.getMethodName();
+            return entryPoint.getType() + " `" + entryPoint.getRoute() + "`";
         }
         return entryPoint.getType() + " " + entryPoint.getMethodSignature();
+    }
+
+    private String defaultValue(String value, String defaultValue) {
+        return StringUtils.isBlank(value) ? defaultValue : value;
     }
 }
