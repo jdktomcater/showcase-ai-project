@@ -1,0 +1,29 @@
+spring:
+  application:
+    name: showcase-ai-mcp-apm-skywalking
+  main:
+    banner-mode: off
+    web-application-type: none
+  ai:
+    mcp:
+      server:
+        stdio: true
+        name: showcase-ai-mcp-apm-skywalking
+        version: 1.0.0
+        instructions: 提供 SkyWalking 性能诊断工具，适合快速发现慢接口、慢 Trace 和下游依赖瓶颈。
+
+skywalking:
+  base-url: ${SKYWALKING_BASE_URL:http://localhost:12800}
+  graphql-path: ${SKYWALKING_GRAPHQL_PATH:/graphql}
+  authorization: ${SKYWALKING_AUTHORIZATION:}
+  connect-timeout: ${SKYWALKING_CONNECT_TIMEOUT:3s}
+  request-timeout: ${SKYWALKING_REQUEST_TIMEOUT:20s}
+  default-endpoint-limit: ${SKYWALKING_DEFAULT_ENDPOINT_LIMIT:5}
+  default-trace-limit: ${SKYWALKING_DEFAULT_TRACE_LIMIT:5}
+  default-duration-minutes: ${SKYWALKING_DEFAULT_DURATION_MINUTES:30}
+  default-min-trace-duration-ms: ${SKYWALKING_DEFAULT_MIN_TRACE_DURATION_MS:500}
+
+logging:
+  level:
+    root: INFO
+    com.jdktomcat.showcase.ai.mcp.apm.skywalking: INFO
