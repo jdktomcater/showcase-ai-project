@@ -1,6 +1,7 @@
 package com.jdktomcat.showcase.ai.code.assistant.config;
 
-import com.jdktomcat.showcase.ai.code.assistant.agent.*;
+import com.jdktomcat.showcase.ai.code.assistant.agent.BusinessAgent;
+import com.jdktomcat.showcase.ai.code.assistant.agent.QualityAgent;
 import com.jdktomcat.showcase.ai.code.assistant.domain.dto.CommitTaskState;
 import com.jdktomcat.showcase.ai.code.assistant.service.edge.CommitRetryEdgeAction;
 import org.bsc.langgraph4j.CompiledGraph;
@@ -26,7 +27,6 @@ public class AgentWorkflowConfig {
     public CompiledGraph<CommitTaskState> commitWorkflow(
             BusinessAgent businessAgent,
             QualityAgent qualityAgent,
-            CommitResultAgent commitResultAgent,
             CommitRetryEdgeAction commitRetryEdgeAction,
             CommitTaskStateFactory stateFactory
     ) throws GraphStateException {
@@ -37,17 +37,15 @@ public class AgentWorkflowConfig {
         // 2. 添加节点（每个智能体对应一个节点）
         graphBuilder.addNode("business", node_async(businessAgent));
         graphBuilder.addNode("quality", node_async(qualityAgent));
-        graphBuilder.addNode("result", node_async(commitResultAgent));
         graphBuilder.addNode("dispatchReview", node_async(CommitTaskState::toMap));
 
         // 3. 定义流程流转规则（边）
-        // 本地 Ollama 容易在并发大 prompt 下超时，因此业务分析后由质量 Agent 串行完成三个专项审查。
+        // 本地 Ollama 容易在并发大 prompt 下超时，因此业务分析后由质量 Agent 串行完成专项审查与最终裁决。
         graphBuilder.addEdge(START, "dispatchReview");
         graphBuilder.addEdge("dispatchReview", "business");
         graphBuilder.addEdge("business", "quality");
-        graphBuilder.addEdge("quality", "result");
 
-        graphBuilder.addConditionalEdges("result",
+        graphBuilder.addConditionalEdges("quality",
                 AsyncEdgeAction.edge_async(commitRetryEdgeAction),
                 Map.of(
                         "retry", "dispatchReview",
