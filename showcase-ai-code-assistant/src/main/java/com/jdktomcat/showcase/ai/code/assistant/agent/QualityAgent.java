@@ -30,8 +30,6 @@ public class QualityAgent implements NodeAction<CommitTaskState> {
 
     @Value("${app.ai.review.quality-diff-max-chars:4200}")
     private int qualityDiffMaxChars;
-    @Value("${app.ai.review.final-section-max-chars:900}")
-    private int finalSectionMaxChars;
     @Value("${app.ai.review.quality-business-max-chars:260}")
     private int qualityBusinessMaxChars;
     @Value("${app.ai.review.quality-impact-max-chars:360}")
