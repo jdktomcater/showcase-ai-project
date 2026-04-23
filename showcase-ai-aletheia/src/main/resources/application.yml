@@ -1,0 +1,41 @@
+server:
+  port: 8090
+
+spring:
+  application:
+    name: showcase-ai-aletheia
+  ai:
+    mcp:
+      client:
+        enabled: ${ALETHEIA_MCP_ENABLED:false}
+        type: SYNC
+        request-timeout: ${ALETHEIA_MCP_REQUEST_TIMEOUT:20s}
+        stdio:
+          connections:
+            skywalking:
+              command: ${ALETHEIA_MCP_SKYWALKING_COMMAND:java}
+              args:
+                - -jar
+                - ${ALETHEIA_MCP_SKYWALKING_JAR:}
+              env:
+                SKYWALKING_BASE_URL: ${SKYWALKING_BASE_URL:http://localhost:12800}
+                SKYWALKING_GRAPHQL_PATH: ${SKYWALKING_GRAPHQL_PATH:/graphql}
+                SKYWALKING_AUTHORIZATION: ${SKYWALKING_AUTHORIZATION:}
+    ollama:
+      base-url: ${OLLAMA_BASE_URL:http://localhost:11434}
+      chat:
+        options:
+          model: ${OLLAMA_CHAT_MODEL:gpt-oss:120b-cloud}
+          temperature: ${OLLAMA_CHAT_TEMPERATURE:0.1}
+          num-predict: ${OLLAMA_CHAT_NUM_PREDICT:1024}
+          num-ctx: ${OLLAMA_CHAT_NUM_CTX:4096}
+
+app:
+  aletheia:
+    mcp-enabled: ${ALETHEIA_ANALYSIS_MCP_ENABLED:true}
+    prompt-max-chars: ${ALETHEIA_PROMPT_MAX_CHARS:6000}
+    default-duration-minutes: ${ALETHEIA_DEFAULT_DURATION_MINUTES:30}
+
+logging:
+  level:
+    com.jdktomcat.showcase.ai.aletheia: INFO

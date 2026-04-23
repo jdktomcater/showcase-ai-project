@@ -27,6 +27,7 @@
         <module>showcase-ai-code-assistant</module>
         <module>showcase-ai-code-chunk</module>
         <module>showcase-ai-mcp</module>
+        <module>showcase-ai-aletheia</module>
     </modules>
 
     <dependencyManagement>
