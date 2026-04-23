@@ -70,7 +70,7 @@ public class TelegramNotificationService {
                 .append("提交: ").append(StringUtils.defaultString(state.getSha())).append('\n')
                 .append("描述: ").append(StringUtils.defaultString(state.getMessage())).append('\n')
                 .append("作者: ").append(StringUtils.defaultString(state.getAuthor())).append('\n')
-                .append("结论: ").append(defaultValue(state.getDecision(), "UNKNOWN"))
+                .append("结论: ").append(StringUtils.defaultIfBlank(state.getDecision(), "UNKNOWN"))
                 .append('\n')
                 .append('\n')
                 .append("评审意见: ").append(reviewOpinion);
@@ -175,9 +175,5 @@ public class TelegramNotificationService {
             return entryPoint.getType() + " `" + entryPoint.getRoute() + "`";
         }
         return entryPoint.getType() + " " + entryPoint.getMethodSignature();
-    }
-
-    private String defaultValue(String value, String defaultValue) {
-        return StringUtils.isBlank(value) ? defaultValue : value;
     }
 }

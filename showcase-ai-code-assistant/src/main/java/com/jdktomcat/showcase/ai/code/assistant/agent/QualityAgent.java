@@ -86,7 +86,7 @@ public class QualityAgent implements NodeAction<CommitTaskState> {
         state.setTelegramMessage(telegramMessage);
         state.setNeedRetry(false);
 
-        log.info("质量审查完成（单次模型调用），decision={} 规范={} 性能={} 安全={}",
+        log.info("质量审查完成，decision={} 规范={} 性能={} 安全={}",
                 decision, conventionReport.length(), performanceReport.length(), securityReport.length());
     }
 
@@ -94,7 +94,7 @@ public class QualityAgent implements NodeAction<CommitTaskState> {
         String primaryResponse = reviewChatService.callOrFallback(
                 "quality-review",
                 limitQualityPrompt(buildUnifiedPrompt(state)),
-                this::blankRetrySentinel,
+                () -> BLANK_RETRY_SENTINEL,
                 false
         );
         if (!isBlankRetrySentinel(primaryResponse) && !isBlankResponse(primaryResponse)) {
@@ -637,10 +637,6 @@ public class QualityAgent implements NodeAction<CommitTaskState> {
 
     private boolean isBlankResponse(String value) {
         return value == null || value.isBlank();
-    }
-
-    private String blankRetrySentinel() {
-        return BLANK_RETRY_SENTINEL;
     }
 
     private boolean isBlankRetrySentinel(String response) {

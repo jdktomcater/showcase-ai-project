@@ -151,7 +151,6 @@ class QualityAgentTest {
 
         QualityAgent agent = new QualityAgent(reviewChatService);
         ReflectionTestUtils.setField(agent, "qualityDiffMaxChars", 4200);
-        ReflectionTestUtils.setField(agent, "finalSectionMaxChars", 900);
         ReflectionTestUtils.setField(agent, "qualityBusinessMaxChars", 260);
         ReflectionTestUtils.setField(agent, "qualityImpactMaxChars", 360);
         ReflectionTestUtils.setField(agent, "qualityPromptMaxChars", 4800);

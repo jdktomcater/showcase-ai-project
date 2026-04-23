@@ -65,7 +65,6 @@ app:
     review:
       enabled: ${AI_REVIEW_ENABLED:true}
       fail-open: ${AI_REVIEW_FAIL_OPEN:true}
-      final-section-max-chars: ${AI_REVIEW_FINAL_SECTION_MAX_CHARS:900}
       quality-diff-max-chars: ${AI_REVIEW_QUALITY_DIFF_MAX_CHARS:4200}
       quality-business-max-chars: ${AI_REVIEW_QUALITY_BUSINESS_MAX_CHARS:260}
       quality-impact-max-chars: ${AI_REVIEW_QUALITY_IMPACT_MAX_CHARS:360}
