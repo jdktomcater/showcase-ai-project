@@ -3,9 +3,13 @@ package com.jdktomcat.showcase.ai.aletheia.config;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
+import lombok.Getter;
+import lombok.Setter;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.validation.annotation.Validated;
 
+@Setter
+@Getter
 @Validated
 @ConfigurationProperties(prefix = "app.aletheia")
 public class AletheiaProperties {
@@ -31,35 +35,4 @@ public class AletheiaProperties {
             4. 如果证据不足，明确指出还需要补充什么信息。
             """;
 
-    public boolean isMcpEnabled() {
-        return mcpEnabled;
-    }
-
-    public void setMcpEnabled(boolean mcpEnabled) {
-        this.mcpEnabled = mcpEnabled;
-    }
-
-    public int getPromptMaxChars() {
-        return promptMaxChars;
-    }
-
-    public void setPromptMaxChars(int promptMaxChars) {
-        this.promptMaxChars = promptMaxChars;
-    }
-
-    public int getDefaultDurationMinutes() {
-        return defaultDurationMinutes;
-    }
-
-    public void setDefaultDurationMinutes(int defaultDurationMinutes) {
-        this.defaultDurationMinutes = defaultDurationMinutes;
-    }
-
-    public String getPerformanceSystemPrompt() {
-        return performanceSystemPrompt;
-    }
-
-    public void setPerformanceSystemPrompt(String performanceSystemPrompt) {
-        this.performanceSystemPrompt = performanceSystemPrompt;
-    }
 }

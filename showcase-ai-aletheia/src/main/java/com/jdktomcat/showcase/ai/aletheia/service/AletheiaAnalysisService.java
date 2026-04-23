@@ -5,13 +5,12 @@ import com.jdktomcat.showcase.ai.aletheia.domain.AnalysisDomain;
 import com.jdktomcat.showcase.ai.aletheia.dto.AnalysisRequest;
 import com.jdktomcat.showcase.ai.aletheia.dto.AnalysisResponse;
 import org.apache.commons.lang3.StringUtils;
-import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.tool.ToolCallbackProvider;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 
 import java.time.OffsetDateTime;
-import java.util.List;
 
 @Service
 public class AletheiaAnalysisService {
