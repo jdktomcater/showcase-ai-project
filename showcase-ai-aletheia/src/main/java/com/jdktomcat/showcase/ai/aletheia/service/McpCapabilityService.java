@@ -16,6 +16,11 @@ public class McpCapabilityService {
             "skywalking:diagnoseServicePerformance"
     );
 
+    private static final List<String> TRACE_LOG_TOOLS = List.of(
+            "skywalking:locateSlowEndpoints",
+            "skywalking:diagnoseTrace"
+    );
+
     private final ObjectProvider<ToolCallbackProvider> toolCallbackProvider;
 
     public McpCapabilityService(ObjectProvider<ToolCallbackProvider> toolCallbackProvider) {
@@ -32,5 +37,9 @@ public class McpCapabilityService {
 
     public List<String> performanceTools() {
         return PERFORMANCE_TOOLS;
+    }
+
+    public List<String> traceLogTools() {
+        return TRACE_LOG_TOOLS;
     }
 }
