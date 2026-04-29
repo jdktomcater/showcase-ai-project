@@ -77,11 +77,9 @@ public class TraceLogAnalysisService {
         }
 
         TraceEvidence evidence = readTraceEvidence(request);
-        if (evidence == null || evidence.spans.isEmpty()) {
-            return fallback(request, modelAvailable, true, evidence == null ? null : evidence.rawEvidence,
-                    evidence == null
-                            ? "MCP 工具未返回有效链路日志，请检查 SkyWalking 数据范围与服务名。"
-                            : "MCP 工具返回成功，但未在该 Trace 中找到 Span 数据。",
+        if (evidence.spans.isEmpty()) {
+            return fallback(request, modelAvailable, true, evidence.rawEvidence,
+                    "MCP 工具返回成功，但未在该 Trace 中找到 Span 数据。",
                     List.of("扩大查询的时间窗口", "下调最小慢 Trace 阈值", "确认服务名 / TraceId 在 SkyWalking 中存在"));
         }
 
@@ -211,7 +209,6 @@ public class TraceLogAnalysisService {
         return args;
     }
 
-    @SuppressWarnings("unchecked")
     private List<String> extractTraceIds(Map<String, Object> slowResult) {
         if (slowResult == null) {
             return List.of();
@@ -324,13 +321,9 @@ public class TraceLogAnalysisService {
             return List.of("无可用 Span，建议扩大时间窗口或确认 TraceId / 服务名是否正确");
         }
         List<String> suggestions = new ArrayList<>();
-        SpanRecord top = evidence.spans.stream()
-                .max(Comparator.comparingLong(span -> span.durationMs))
-                .orElse(null);
-        if (top != null) {
-            suggestions.add("Top1 瓶颈：`" + StringUtils.defaultIfBlank(top.endpoint, top.component) + "`，耗时 "
-                    + top.durationMs + " ms，所在服务 `" + top.service + "`。");
-        }
+        evidence.spans.stream()
+                .max(Comparator.comparingLong(span -> span.durationMs)).ifPresent(top -> suggestions.add("Top1 瓶颈：`" + StringUtils.defaultIfBlank(top.endpoint, top.component) + "`，耗时 "
+                        + top.durationMs + " ms，所在服务 `" + top.service + "`。"));
         long errorCount = evidence.spans.stream().filter(span -> span.error).count();
         if (errorCount > 0) {
             suggestions.add("链路中出现 " + errorCount + " 个 error Span，建议先排查异常根因。");
@@ -345,7 +338,7 @@ public class TraceLogAnalysisService {
         StringBuilder builder = new StringBuilder();
         builder.append("## 链路证据\n");
         builder.append("- 证据来源：").append(evidence.evidenceSource).append('\n');
-        builder.append("- 聚焦 TraceId：").append(StringUtils.defaultString(evidence.traceId, "-")).append('\n');
+        builder.append("- 聚焦 TraceId：").append(Objects.toString(evidence.traceId, "-")).append('\n');
         builder.append("- 总耗时（最长 Trace）：").append(evidence.totalDurationMs).append(" ms\n");
         builder.append("- Span 数量：").append(evidence.spans.size()).append('\n');
         builder.append("\n## Top 瓶颈 Span\n");
@@ -353,9 +346,9 @@ public class TraceLogAnalysisService {
                 builder.append("- ")
                         .append(StringUtils.defaultIfBlank(span.endpoint(), span.component()))
                         .append("（service=")
-                        .append(StringUtils.defaultString(span.service(), "-"))
+                        .append(Objects.toString(span.service(), "-"))
                         .append("，layer=")
-                        .append(StringUtils.defaultString(span.layer(), "-"))
+                        .append(Objects.toString(span.layer(), "-"))
                         .append("，duration=")
                         .append(span.durationMs())
                         .append(" ms")
@@ -375,9 +368,9 @@ public class TraceLogAnalysisService {
         StringBuilder builder = new StringBuilder();
         builder.append("## 当前状态\n").append(summary).append('\n');
         builder.append("\n## 上下文\n");
-        builder.append("- traceId: ").append(StringUtils.defaultString(request.getTraceId(), "-")).append('\n');
-        builder.append("- serviceName: ").append(StringUtils.defaultString(request.getServiceName(), "-")).append('\n');
-        builder.append("- endpointKeyword: ").append(StringUtils.defaultString(request.getEndpointKeyword(), "-")).append('\n');
+        builder.append("- traceId: ").append(Objects.toString(request.getTraceId(), "-")).append('\n');
+        builder.append("- serviceName: ").append(Objects.toString(request.getServiceName(), "-")).append('\n');
+        builder.append("- endpointKeyword: ").append(Objects.toString(request.getEndpointKeyword(), "-")).append('\n');
         builder.append("- mcpAvailable: ").append(mcpAvailable).append('\n');
         builder.append("- modelAvailable: ").append(modelAvailable).append('\n');
         builder.append("\n## 建议动作\n");
@@ -391,7 +384,7 @@ public class TraceLogAnalysisService {
                 mcpAvailable,
                 StringUtils.isNotBlank(request.getTraceId())
                         ? "traceId=" + request.getTraceId()
-                        : "serviceName=" + StringUtils.defaultString(request.getServiceName(), "-"),
+                        : "serviceName=" + Objects.toString(request.getServiceName(), "-"),
                 request.getTraceId(),
                 0L,
                 0,

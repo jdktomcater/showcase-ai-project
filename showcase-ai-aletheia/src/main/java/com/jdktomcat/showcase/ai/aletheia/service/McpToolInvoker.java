@@ -89,9 +89,7 @@ public class McpToolInvoker {
         List<ToolCallback> aggregated = new ArrayList<>();
         toolCallbackProviders.orderedStream().forEach(provider -> {
             ToolCallback[] callbacks = provider.getToolCallbacks();
-            if (callbacks != null) {
-                aggregated.addAll(Arrays.asList(callbacks));
-            }
+            aggregated.addAll(Arrays.asList(callbacks));
         });
         return aggregated.toArray(ToolCallback[]::new);
     }
