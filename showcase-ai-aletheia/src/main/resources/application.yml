@@ -7,7 +7,7 @@ spring:
   ai:
     mcp:
       client:
-        enabled: ${ALETHEIA_MCP_ENABLED:false}
+        enabled: ${ALETHEIA_MCP_ENABLED:true}
         type: SYNC
         request-timeout: ${ALETHEIA_MCP_REQUEST_TIMEOUT:20s}
         stdio:
@@ -16,7 +16,7 @@ spring:
               command: ${ALETHEIA_MCP_SKYWALKING_COMMAND:java}
               args:
                 - -jar
-                - ${ALETHEIA_MCP_SKYWALKING_JAR:}
+                - ${ALETHEIA_MCP_SKYWALKING_JAR:/Users/yuhata/workspace/ai/coder-assistant/showcase-ai-project/showcase-ai-mcp/showcase-ai-mcp-apm/showcase-ai-mcp-apm-skywalking/target/showcase-ai-mcp-apm-skywalking-1.0.0-SNAPSHOT.jar}
               env:
                 SKYWALKING_BASE_URL: ${SKYWALKING_BASE_URL:http://localhost:12800}
                 SKYWALKING_GRAPHQL_PATH: ${SKYWALKING_GRAPHQL_PATH:/graphql}

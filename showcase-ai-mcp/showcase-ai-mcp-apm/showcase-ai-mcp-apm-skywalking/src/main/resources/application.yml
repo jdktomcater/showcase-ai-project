@@ -4,6 +4,8 @@ spring:
   main:
     banner-mode: off
     web-application-type: none
+    # STDIO MCP Server：禁止把 Spring Boot 的启动信息打到 stdout，避免污染 MCP 协议
+    log-startup-info: false
   ai:
     mcp:
       server:

@@ -97,6 +97,22 @@ export ALETHEIA_MCP_SKYWALKING_JAR=/absolute/path/showcase-ai-mcp-apm-skywalking
 export SKYWALKING_BASE_URL=http://localhost:12800
 ```
 
+## 常见问题：MCP 通道收到非 JSON 输出
+
+如果 Aletheia 启动时报：
+
+```
+Error processing inbound message for line: 2026-04-30T... INFO ... --- [showcase-ai-mcp-apm-skywalking] ...
+com.fasterxml.jackson.core.JsonParseException: Unexpected character ('-' (code 45)):
+Expected space separating root-level values
+```
+
+说明 STDIO MCP Server 把 Spring Boot 的启动日志写进了 `System.out`，污染了 MCP JSON-RPC 通道。
+本仓库内的 `showcase-ai-mcp-apm-skywalking` 已经通过
+`logback-spring.xml` 把日志全量改写到 `System.err`，并关闭了 banner / startup info；
+若你接入的是其他第三方 MCP Server，请同样确保它的 stdout 只输出协议消息，
+任何业务/启动日志都应改写到 stderr 或文件。
+
 ## 链路日志分析参数
 
 通过环境变量可调（也可写入 `application.yml`）：
