@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  STDIO 模式下的 MCP Server 必须保证 System.out 仅用于 MCP JSON-RPC 协议输出，
+  任何业务/启动日志都不能进 stdout，否则上游 MCP Client（例如 Aletheia）的
+  Jackson 解析器会因为读到非 JSON 文本而抛出
+  "Unexpected character ('-' (code 45)): Expected space separating root-level values"。
+
+  因此这里把根 Logger 全量重定向到 System.err，stdout 完全留给 MCP 协议。
+  如需文件日志，可通过 application.yml 中的 logging.file.name 启用，Spring Boot
+  会自动追加一个 RollingFileAppender，不影响 stdout。
+-->
+<configuration>
+
+    <!-- 关键：屏蔽 logback 自身的 "OnConsoleStatusListener" 默认行为，
+         否则任何配置警告会被 logback 直接打到 stdout，污染 MCP 协议通道。 -->
+    <statusListener class="ch.qos.logback.core.status.NopStatusListener"/>
+
+    <conversionRule conversionWord="wex"
+                    class="org.springframework.boot.logging.logback.WhitespaceThrowableProxyConverter"/>
+    <conversionRule conversionWord="wEx"
+                    class="org.springframework.boot.logging.logback.ExtendedWhitespaceThrowableProxyConverter"/>
+
+    <property name="LOG_PATTERN"
+              value="%d{yyyy-MM-dd HH:mm:ss.SSS} %5p [%t] %-40.40logger{39} : %m%n%wEx"/>
+
+    <!-- 仅向 stderr 输出，stdout 留给 MCP STDIO 协议 -->
+    <appender name="STDERR" class="ch.qos.logback.core.ConsoleAppender">
+        <target>System.err</target>
+        <encoder>
+            <pattern>${LOG_PATTERN}</pattern>
+            <charset>UTF-8</charset>
+        </encoder>
+    </appender>
+
+    <!-- 抑制几个最容易污染 stdout 的 Spring/Tomcat 启动器日志（非必要，仅减噪） -->
+    <logger name="org.apache.tomcat" level="WARN"/>
+    <logger name="org.apache.catalina" level="WARN"/>
+
+    <root level="INFO">
+        <appender-ref ref="STDERR"/>
+    </root>
+
+</configuration>
