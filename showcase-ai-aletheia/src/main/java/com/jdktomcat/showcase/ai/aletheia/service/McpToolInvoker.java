@@ -130,7 +130,7 @@ public class McpToolInvoker {
             return errorResult("MCP 工具返回为空", Map.of());
         }
         try {
-            Object parsed = objectMapper.readValue(rawResult, new TypeReference<Object>() {
+            Object parsed = objectMapper.readValue(rawResult, new TypeReference<>() {
             });
             if (parsed instanceof Map<?, ?> map) {
                 @SuppressWarnings("unchecked")
